@@ -1168,6 +1168,7 @@ if (isProd) {
   );
   app.get(/.*/, (_req, res) => res.sendFile(path.join(root, "dist", "index.html")));
 } else {
+  const { readFile } = await import("node:fs/promises");
   const { createServer: createViteServer } = await import("vite");
   const vite = await createViteServer({
     server: { middlewareMode: true },
@@ -1175,6 +1176,15 @@ if (isProd) {
     root,
   });
   app.use(vite.middlewares);
+  app.get(/.*/, async (req, res, next) => {
+    try {
+      const html = await readFile(path.join(root, "index.html"), "utf8");
+      res.status(200).set({ "Content-Type": "text/html" }).send(await vite.transformIndexHtml(req.originalUrl, html));
+    } catch (error) {
+      vite.ssrFixStacktrace(error);
+      next(error);
+    }
+  });
 }
 
 const server = app.listen(PORT, HOST, () => {
