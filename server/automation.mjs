@@ -7,6 +7,7 @@ export const JOB_TYPES = {
   DISCOVER_SOURCE: "DISCOVER_SOURCE",
   FETCH_LIST_PAGE: "FETCH_LIST_PAGE",
   FETCH_DETAIL_PAGE: "FETCH_DETAIL_PAGE",
+  DOWNLOAD_DOCUMENT: "DOWNLOAD_DOCUMENT",
   PARSE_DOCUMENT: "PARSE_DOCUMENT",
   EXTRACT_CALL_DATA: "EXTRACT_CALL_DATA",
   VALIDATE_CALL: "VALIDATE_CALL",
@@ -15,6 +16,7 @@ export const JOB_TYPES = {
   VERIFY_LINKS: "VERIFY_LINKS",
   PUBLISH_CALL: "PUBLISH_CALL",
   RECHECK_DEADLINE: "RECHECK_DEADLINE",
+  ARCHIVE_CALL: "ARCHIVE_CALL",
 };
 
 export const PAGE_TYPES = {
@@ -67,7 +69,7 @@ export const AUTOMATION_CONFIG = {
     manualReview: 50,
     rejectBelow: 50,
   },
-  closingSoonDays: 7,
+  closingSoonDays: Number(process.env.CLOSING_SOON_DAYS || 7),
 };
 
 export const SOURCE_REGISTRY = [
@@ -842,8 +844,10 @@ export function detectChanges(previousCalls = {}, nextCalls = []) {
 }
 
 export class AutomationQueue {
-  constructor({ concurrency = 2 } = {}) {
+  constructor({ concurrency = 2, baseDelayMs = Number(process.env.CRAWLER_RETRY_BASE_DELAY_MS || 1000), maxDelayMs = Number(process.env.CRAWLER_RETRY_MAX_DELAY_MS || 15 * 60 * 1000) } = {}) {
     this.concurrency = concurrency;
+    this.baseDelayMs = baseDelayMs;
+    this.maxDelayMs = maxDelayMs;
     this.pending = [];
     this.running = new Map();
     this.deadLetters = [];
@@ -860,10 +864,15 @@ export class AutomationQueue {
       payload: job.payload || {},
       priority: job.priority ?? 5,
       retryCount: job.retryCount || 0,
-      maxRetries: job.maxRetries ?? 2,
+      maxRetries: job.maxRetries ?? Number(process.env.CRAWLER_JOB_MAX_RETRIES || 3),
       timeoutMs: job.timeoutMs ?? Number(process.env.CRAWLER_JOB_TIMEOUT_MS || 15000),
       idempotencyKey: job.idempotencyKey || `${job.type}:${job.url || job.sourceId || ""}`,
+      status: job.status || "pending",
+      errorCode: job.errorCode || "",
+      errorMessage: job.errorMessage || "",
+      availableAt: job.availableAt || new Date().toISOString(),
       createdAt: job.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
     if (this.activeKeys.has(normalized.idempotencyKey)) return normalized;
     this.activeKeys.add(normalized.idempotencyKey);
@@ -872,10 +881,71 @@ export class AutomationQueue {
     return normalized;
   }
 
+  nextBackoffMs(job) {
+    const retry = Math.max(0, job.retryCount || 0);
+    const jitter = Math.floor(Math.random() * this.baseDelayMs);
+    return Math.min(this.maxDelayMs, this.baseDelayMs * 2 ** retry + jitter);
+  }
+
+  fail(job, error = {}) {
+    const failed = {
+      ...job,
+      retryCount: (job.retryCount || 0) + 1,
+      errorCode: error.code || error.name || "JOB_ERROR",
+      errorMessage: error.message || String(error),
+      updatedAt: new Date().toISOString(),
+    };
+    this.running.delete(job.id);
+    if (failed.retryCount > failed.maxRetries) {
+      const deadLetter = { ...failed, status: "dead_letter", failedAt: new Date().toISOString() };
+      this.deadLetters.push(deadLetter);
+      this.processed.push(deadLetter);
+      this.activeKeys.delete(failed.idempotencyKey);
+      return deadLetter;
+    }
+    const delayMs = this.nextBackoffMs(failed);
+    const retried = {
+      ...failed,
+      status: "pending",
+      availableAt: new Date(Date.now() + delayMs).toISOString(),
+      backoffMs: delayMs,
+    };
+    this.pending.push(retried);
+    this.pending.sort((a, b) => a.priority - b.priority || new Date(a.availableAt).getTime() - new Date(b.availableAt).getTime());
+    return retried;
+  }
+
+  complete(job, result = {}) {
+    const completed = {
+      ...job,
+      status: "completed",
+      result,
+      completedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    this.running.delete(job.id);
+    this.processed.push(completed);
+    this.activeKeys.delete(job.idempotencyKey);
+    return completed;
+  }
+
+  takeReady() {
+    if (this.running.size >= this.concurrency) return null;
+    const now = Date.now();
+    const index = this.pending.findIndex((job) => new Date(job.availableAt).getTime() <= now);
+    if (index === -1) return null;
+    const [job] = this.pending.splice(index, 1);
+    const running = { ...job, status: "running", startedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    this.running.set(running.id, running);
+    return running;
+  }
+
   snapshot() {
     return {
       pending: this.pending.length,
+      pendingJobs: this.pending.slice(0, 50),
       running: this.running.size,
+      runningJobs: [...this.running.values()],
       deadLetters: this.deadLetters.slice(-20),
       processed: this.processed.slice(-50),
       jobTypes: Object.values(JOB_TYPES),
@@ -883,17 +953,57 @@ export class AutomationQueue {
   }
 }
 
-export function createSourceAdapters(scraperMap) {
+export function createSourceAdapters(scraperMap = {}) {
   return SOURCE_REGISTRY.filter((source) => source.isActive).map((source) => ({
     ...source,
-    discoverListPages: async () => source.listUrls,
-    fetchListPage: async () => ({ sourceId: source.id, urls: source.listUrls }),
+    discover: async () => scraperMap[source.id]?.discover?.() || source.listUrls,
+    discoverListPages: async () => scraperMap[source.id]?.discover?.() || source.listUrls,
+    fetchListPage: async (url = source.listUrls[0]) => {
+      const scraper = scraperMap[source.id];
+      if (scraper?.fetchListPage) return scraper.fetchListPage(url);
+      return { sourceId: source.id, urls: source.listUrls };
+    },
+    extractListItems: async (page) => {
+      const scraper = scraperMap[source.id];
+      if (scraper?.extractListItems) return scraper.extractListItems(page);
+      if (typeof scraper === "function") return scraper();
+      return [];
+    },
     extractDetailUrls: async () => [],
-    fetchDetailPage: async () => null,
+    fetchDetailPage: async (item) => scraperMap[source.id]?.fetchDetailPage?.(item) || null,
+    extractDetailData: async (page, item) => scraperMap[source.id]?.extractDetailData?.(page, item) || {},
+    discoverDocuments: async (detailData) => detailData?.attachments || [],
+    parseDocuments: async () => [],
+    validate: async (items) => items.filter(Boolean),
+    normalize: async (items, previousCalls = {}) => items.map((item) => {
+      const firstPass = normalizeCallRecord(item, { source });
+      return normalizeCallRecord(firstPass, { source, previousCall: findPreviousCallRecord(previousCalls, firstPass) });
+    }),
+    healthCheck: async () => scraperMap[source.id]?.healthCheck?.() || { ok: true },
     extractStructuredData: async () => {
-      const scrape = scraperMap[source.id];
-      if (!scrape) return [];
-      return scrape();
+      const scraper = scraperMap[source.id];
+      if (!scraper) return [];
+      if (typeof scraper === "function") return scraper();
+      const urls = await (scraper.discover?.() || source.listUrls);
+      const items = [];
+      for (const url of urls) {
+        const page = await scraper.fetchListPage(url);
+        const listItems = await scraper.extractListItems(page);
+        if (process.env.ENABLE_DEEP_SCRAPING === "true" && scraper.fetchDetailPage && scraper.extractDetailData) {
+          for (const item of listItems) {
+            try {
+              const detailPage = await scraper.fetchDetailPage(item);
+              const detail = await scraper.extractDetailData(detailPage, item);
+              items.push({ ...item, ...detail });
+            } catch {
+              items.push(item);
+            }
+          }
+        } else {
+          items.push(...listItems);
+        }
+      }
+      return items;
     },
     validateExtractedData: async (items) => items.filter(Boolean),
     normalizeData: async (items, previousCalls = {}) => items.map((item) => {

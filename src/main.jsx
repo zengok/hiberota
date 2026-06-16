@@ -39,6 +39,8 @@ import {
   X,
 } from "lucide-react";
 import catalogData from "./data/catalog.json";
+import { FavoriteButton } from "./components/FavoriteButton.jsx";
+import { CallCardSkeleton } from "./components/SkeletonLoading.jsx";
 import "./styles.css";
 
 const filterTabs = [
@@ -750,6 +752,7 @@ function CallCard({ call, selected, onSelect, mode = "expand" }) {
         <span className="statusChip">{statusLabel(call.normalizedStatus || call.status)}</span>
         <span className={`scopeChip scope-${call.scope}`}>{scopeLabel(call.scope)}</span>
         <span className="sourceTrust"><ShieldCheck size={15} />{sourceBadge(call)}</span>
+        <FavoriteButton callId={call.id} className="cardFavorite" label="Favori" />
       </div>
       <h3>{call.title}</h3>
       <p>{call.summary || call.category}</p>
@@ -984,14 +987,16 @@ function SummaryCard({ icon: Icon, title, text, href }) {
 }
 
 function CallsPage({ route, model, filters, setFilters, refresh, loading, fetchedAt, errors }) {
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const scopeFromRoute = routeScope(route.pathname);
   const isUpcoming = route.pathname === "/cagrilar/yaklasan";
-  const pageTitle = isUpcoming ? "Yaklaşan Başvurular" : scopeFromRoute ? `${scopeLabel(scopeFromRoute)} Çağrıları` : "Proje Destek Çağrıları";
+  const isNew = route.pathname === "/cagrilar/yeni";
+  const pageTitle = isUpcoming ? "Yaklaşan Başvurular" : isNew ? "Yeni Çağrılar" : scopeFromRoute ? `${scopeLabel(scopeFromRoute)} Çağrıları` : "Proje Destek Çağrıları";
   const pageText = "Arama, kapsam, kategori, kurum, başvuru durumu ve son tarihe göre çağrıları filtreleyin.";
   usePageMeta(`${pageTitle} | Hibe Rota`, pageText);
   const pageFilters = useMemo(
-    () => ({ ...filters, scope: scopeFromRoute || filters.scope, deadlineWithin: isUpcoming ? "45" : filters.deadlineWithin }),
-    [filters, scopeFromRoute, isUpcoming],
+    () => ({ ...filters, scope: scopeFromRoute || filters.scope, deadlineWithin: isUpcoming ? "45" : filters.deadlineWithin, sort: isNew ? "newest" : filters.sort }),
+    [filters, scopeFromRoute, isUpcoming, isNew],
   );
   const deferredFilters = useDeferredValue(pageFilters);
   const filtered = useMemo(() => filterCalls(model.calls, deferredFilters), [model.calls, deferredFilters]);
@@ -1009,7 +1014,15 @@ function CallsPage({ route, model, filters, setFilters, refresh, loading, fetche
       <Breadcrumb items={[{ label: pageTitle }]} />
       <PageHero eyebrow="Çağrılar" title={pageTitle} text={pageText} />
       <section className="content callsSection">
-        <FilterPanel calls={model.calls} filters={pageFilters} setFilters={setFilters} categories={model.categoryList} funders={model.funderList} refresh={refresh} loading={loading} fetchedAt={fetchedAt} lockedScope={scopeFromRoute} />
+        <button className="mobileFilterTrigger" type="button" onClick={() => setFiltersOpen(true)}>
+          <ListFilter size={18} />
+          Filtrele
+        </button>
+        {filtersOpen && <button className="filterBackdrop" type="button" aria-label="Filtreleri kapat" onClick={() => setFiltersOpen(false)} />}
+        <div className={`filterSheet ${filtersOpen ? "open" : ""}`}>
+          <button className="sheetClose" type="button" aria-label="Filtreleri kapat" onClick={() => setFiltersOpen(false)}><X size={18} /></button>
+          <FilterPanel calls={model.calls} filters={pageFilters} setFilters={setFilters} categories={model.categoryList} funders={model.funderList} refresh={refresh} loading={loading} fetchedAt={fetchedAt} lockedScope={scopeFromRoute} />
+        </div>
         <div className="resultsArea">
           <div className="sectionHeader">
             <div>
@@ -1026,7 +1039,7 @@ function CallsPage({ route, model, filters, setFilters, refresh, loading, fetche
               <a href={`/api/v1/exports/calls.pdf?${exportQuery}`}><FileDown size={15} /> PDF</a>
             </div>
           </div>
-          {loading && !model.calls.length ? <LoadingState /> : (
+          {loading && !model.calls.length ? <CallCardSkeleton /> : (
             <div className="cardGrid">
               {filtered.map((call) => <CallCard key={call.id} call={call} mode="link" />)}
               {!filtered.length && <EmptyState title="Çağrı bulunamadı" text="Arama ya da filtre seçeneklerini genişleterek tekrar deneyin." />}
@@ -1039,7 +1052,7 @@ function CallsPage({ route, model, filters, setFilters, refresh, loading, fetche
 }
 
 function CallDetailPage({ route, model }) {
-  const id = decodeURIComponent(route.pathname.replace("/cagrilar/", ""));
+  const id = decodeURIComponent(route.pathname.replace(/^\/(?:cagrilar|cagri)\//, ""));
   const call = model.calls.find((item) => item.id === id || item.slug === id);
   const [copied, setCopied] = useState(false);
   const seoDescription = call
@@ -1166,7 +1179,7 @@ function CallDetailPage({ route, model }) {
           </div>
           {!closed && (call.applicationUrl || call.url) && <a className="primaryAction quickApply" href={call.applicationUrl || call.url} target="_blank" rel="noopener noreferrer"><ArrowUpRight size={18} /> Başvuru Yap</a>}
           {closed && <span className="closedNotice">Bu çağrının başvuru süresi sona ermiştir.</span>}
-          <button type="button" className="favoriteAction" onClick={copyLink}><Heart size={19} /> Favorilere Ekle</button>
+          <FavoriteButton callId={call.id} className="favoriteAction" />
         </aside>
       </section>
       <section className="content detailPageGrid">
@@ -1455,6 +1468,40 @@ function FundersPage({ model }) {
   );
 }
 
+function ProgrammeDetailPage({ route, model }) {
+  const slugValue = decodeURIComponent(route.pathname.replace("/program/", ""));
+  const category = model.categoryList.find((item) => normalizeSearch(item).replace(/\s+/g, "-") === slugValue) || slugValue;
+  const calls = model.calls.filter((call) => call.programme === category || call.category === category);
+  usePageMeta(`${category} | Hibe Rota`, `${category} programına ait açık çağrıları inceleyin.`);
+  return (
+    <>
+      <Breadcrumb items={[{ label: "Destek Programları", href: "/programlar" }, { label: category }]} />
+      <PageHero eyebrow="Program" title={category} text={`${calls.length} çağrı bu program veya kategori altında listeleniyor.`} />
+      <section className="content cardGrid">
+        {calls.map((call) => <CallCard key={call.id} call={call} mode="link" />)}
+        {!calls.length && <EmptyState title="Program çağrısı bulunamadı" text="Bu program için canlı kaynaklarda açık çağrı yakalanmadı." />}
+      </section>
+    </>
+  );
+}
+
+function FunderDetailPage({ route, model }) {
+  const slugValue = decodeURIComponent(route.pathname.replace("/kurum/", ""));
+  const funder = model.funderList.find((item) => normalizeSearch(item).replace(/\s+/g, "-") === slugValue) || slugValue;
+  const calls = model.calls.filter((call) => call.funder === funder || call.institution === funder);
+  usePageMeta(`${funder} | Hibe Rota`, `${funder} tarafından yayımlanan destek çağrılarını inceleyin.`);
+  return (
+    <>
+      <Breadcrumb items={[{ label: "Kurumlar", href: "/kurumlar" }, { label: funder }]} />
+      <PageHero eyebrow="Kurum" title={funder} text={`${calls.length} canlı çağrı bu kurumla ilişkilendirildi.`} />
+      <section className="content cardGrid">
+        {calls.map((call) => <CallCard key={call.id} call={call} mode="link" />)}
+        {!calls.length && <EmptyState title="Kurum çağrısı bulunamadı" text="Bu kurum için canlı kaynaklarda açık çağrı yakalanmadı." />}
+      </section>
+    </>
+  );
+}
+
 function CalendarPage({ model }) {
   usePageMeta("Çağrı Takvimi | Hibe Rota", "Yaklaşan proje destek son başvuru tarihlerini takip edin.");
   return (
@@ -1611,6 +1658,43 @@ function StaticPage({ type }) {
   );
 }
 
+function AdminPage({ model, errors, fetchedAt }) {
+  usePageMeta("Admin | Hibe Rota", "Kaynak sağlığı, manuel inceleme ve otomasyon özet ekranı.");
+  const openCalls = model.openCalls.length;
+  const manualReview = model.calls.filter((call) => call.requiresManualReview).length;
+  const lowConfidence = model.calls.filter((call) => (call.confidenceScore || 0) < 75).length;
+  return (
+    <>
+      <Breadcrumb items={[{ label: "Admin" }]} />
+      <PageHero eyebrow="Admin" title="Otomasyon Yönetimi" text="Kaynak sağlığı, kalite sinyalleri ve kuyruk durumu için operasyon ekranı." />
+      <section className="content adminGrid">
+        <article><Database size={24} /><strong>{model.funderList.length}</strong><span>Aktif kaynak/kurum</span></article>
+        <article><ClipboardList size={24} /><strong>{openCalls}</strong><span>Açık çağrı</span></article>
+        <article><AlertCircle size={24} /><strong>{manualReview}</strong><span>Manuel inceleme</span></article>
+        <article><ShieldCheck size={24} /><strong>{lowConfidence}</strong><span>Düşük güven</span></article>
+      </section>
+      <section className="content dashboardIntro">
+        <div className="dashboardPanel">
+          <div className="panelTitle"><h2><RefreshCw size={23} /> Sistem Sağlığı</h2></div>
+          <div className="detailGrid">
+            <DetailItem label="Son çekim" value={formatDateTime(fetchedAt)} />
+            <DetailItem label="Kaynak uyarısı" value={errors.length} />
+            <DetailItem label="Yakında kapanan" value={model.urgent.length} />
+            <DetailItem label="Yeni yakalanan" value={model.recentlyDetected.length} />
+          </div>
+        </div>
+        <div className="dashboardPanel">
+          <div className="panelTitle"><h2><ListFilter size={23} /> İnceleme Kuyruğu</h2></div>
+          <div className="compactList">
+            {model.calls.filter((call) => call.requiresManualReview || !call.deadline || (call.confidenceScore || 0) < 75).slice(0, 8).map((call) => <CompactCall key={call.id} call={call} variant="detected" />)}
+            {!manualReview && <p className="emptyInline">Bekleyen manuel inceleme sinyali yok.</p>}
+          </div>
+        </div>
+      </section>
+    </>
+  );
+}
+
 function NotFoundPage() {
   usePageMeta("Sayfa Bulunamadı | Hibe Rota", "Aradığınız sayfa bulunamadı.");
   return (
@@ -1706,13 +1790,16 @@ function App() {
 
   let page;
   if (route.pathname === "/") page = <HomePage model={model} filters={filters} setFilters={setFilters} />;
-  else if (route.pathname === "/cagrilar" || route.pathname === "/cagrilar/ulusal" || route.pathname === "/cagrilar/avrupa" || route.pathname === "/cagrilar/uluslararasi" || route.pathname === "/cagrilar/yaklasan") page = <CallsPage route={route} model={model} filters={filters} setFilters={setFilters} refresh={refresh} loading={loading} fetchedAt={fetchedAt} errors={errors} />;
-  else if (route.pathname.startsWith("/cagrilar/")) page = <CallDetailPage route={route} model={model} />;
+  else if (route.pathname === "/cagrilar" || route.pathname === "/cagrilar/ulusal" || route.pathname === "/cagrilar/avrupa" || route.pathname === "/cagrilar/uluslararasi" || route.pathname === "/cagrilar/yaklasan" || route.pathname === "/cagrilar/yeni") page = <CallsPage route={route} model={model} filters={filters} setFilters={setFilters} refresh={refresh} loading={loading} fetchedAt={fetchedAt} errors={errors} />;
+  else if (route.pathname.startsWith("/cagrilar/") || route.pathname.startsWith("/cagri/")) page = <CallDetailPage route={route} model={model} />;
   else if (route.pathname === "/programlar") page = <ProgrammesPage model={model} />;
+  else if (route.pathname.startsWith("/program/")) page = <ProgrammeDetailPage route={route} model={model} />;
   else if (route.pathname === "/kurumlar") page = <FundersPage model={model} />;
+  else if (route.pathname.startsWith("/kurum/")) page = <FunderDetailPage route={route} model={model} />;
   else if (route.pathname === "/takvim") page = <CalendarPage model={model} />;
   else if (route.pathname === "/rehber") page = <GuidePage />;
   else if (route.pathname.startsWith("/rehber/")) page = <GuideArticlePage route={route} />;
+  else if (route.pathname === "/admin") page = <AdminPage model={model} errors={errors} fetchedAt={fetchedAt} />;
   else if (["/hakkimizda", "/iletisim", "/sss", "/gizlilik-politikasi", "/kullanim-kosullari"].includes(route.pathname)) page = <StaticPage type={route.pathname} />;
   else page = <NotFoundPage />;
 

@@ -1,7 +1,6 @@
 import express from "express";
 import compression from "compression";
 import helmet from "helmet";
-import * as cheerio from "cheerio";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import JSZip from "jszip";
@@ -21,6 +20,7 @@ import {
   updateSourceHealth,
   verifyLinks,
 } from "./automation.mjs";
+import { createScraperStrategies } from "./scrapers/index.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -521,15 +521,7 @@ function dedupe(items) {
 
 async function collectCalls() {
   const state = await loadAutomationState(AUTOMATION_STATE_PATH);
-  const adapters = createSourceAdapters({
-    tubitak: scrapeTubitak,
-    "ufuk-avrupa": scrapeUfukAvrupa,
-    eureka: scrapeEureka,
-    euresearch: scrapeEuresearchOpenCalls,
-    euroaccess: scrapeEuroAccessCalls,
-    "grants-gov": scrapeGrantsGov,
-    tuseb: scrapeTuseb,
-  });
+  const adapters = createSourceAdapters(createScraperStrategies());
   const errors = [];
   const calls = [];
   await Promise.all(
@@ -543,6 +535,17 @@ async function collectCalls() {
       });
       try {
         const rawItems = await adapter.extractStructuredData();
+        rawItems.forEach((item) => {
+          if (item?.url) {
+            automationQueue.enqueue({
+              type: JOB_TYPES.FETCH_DETAIL_PAGE,
+              sourceId: adapter.id,
+              url: item.url,
+              priority: adapter.sourceType === "official" ? 2 : 4,
+              payload: { listItemId: item.id },
+            });
+          }
+        });
         const validated = await adapter.validateExtractedData(rawItems);
         const normalized = await adapter.normalizeData(validated, state.calls || {});
         calls.push(...normalized);
