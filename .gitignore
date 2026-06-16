@@ -1,0 +1,5 @@
+node_modules/
+dist/
+.hiberota/
+.DS_Store
+*.log

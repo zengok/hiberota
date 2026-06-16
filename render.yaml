@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: proje-yakalama
+    env: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: CALL_CACHE_TTL_MS
+        value: 3600000
+      - key: SOURCE_TIMEOUT_MS
+        value: 12000
+      - key: CRAWLER_CONCURRENCY
+        value: 2
+      - key: LINK_VERIFY_LIMIT
+        value: 25
+      - key: CONFIDENCE_AUTO_PUBLISH_MIN
+        value: 75
