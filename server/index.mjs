@@ -14,6 +14,7 @@ import { adminAuth } from "./middleware/admin-auth.mjs";
 import { errorHandler } from "./middleware/error-handler.mjs";
 import { requestId } from "./middleware/request-id.mjs";
 import { paginatedResponse, parsePositiveInt, sendJsonWithEtag } from "./utils/api-response.mjs";
+import { metricsMiddleware, metricsSnapshot, prometheusMetrics } from "./utils/metrics.mjs";
 import {
   AutomationQueue,
   JOB_TYPES,
@@ -72,6 +73,7 @@ app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(requestId);
 app.use(compression());
+app.use(metricsMiddleware);
 
 morgan.token("safe-url", (req) => {
   const parsedUrl = new URL(req.originalUrl || req.url || "/", "http://localhost");
@@ -1445,6 +1447,26 @@ app.get("/healthz", (_req, res) => {
     cacheTtlMs: CACHE_TTL_MS,
     automation: callCache?.payload?.automation?.metrics || null,
   });
+});
+
+app.get("/readyz", async (_req, res) => {
+  try {
+    await loadAutomationState(AUTOMATION_STATE_PATH);
+    res.json({ ok: true, cacheReady: Boolean(callCache), checkedAt: new Date().toISOString() });
+  } catch (error) {
+    res.status(503).json({ ok: false, error: "readiness_failed" });
+  }
+});
+
+app.get("/metrics", (_req, res) => {
+  const snapshot = metricsSnapshot({
+    cache: {
+      ageMs: callCache ? Date.now() - callCache.cachedAtMs : null,
+      ttlMs: CACHE_TTL_MS,
+    },
+    automation: callCache?.payload?.automation?.metrics || null,
+  });
+  res.type("text/plain; version=0.0.4; charset=utf-8").send(prometheusMetrics(snapshot));
 });
 
 app.use("/api", errorHandler);
