@@ -1,8 +1,8 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import net from "node:net";
 import { loadStateFromDb, saveStateToDb } from "./db.mjs";
+import { isSafeUrl } from "./security/url-safety.mjs";
 
 export const JOB_TYPES = {
   DISCOVER_SOURCE: "DISCOVER_SOURCE",
@@ -318,7 +318,6 @@ export const FUNDING_SOURCES = [
   },
 ];
 
-const PRIVATE_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1"]);
 const STATE_VERSION = 1;
 
 export function normalizeText(value = "") {
@@ -345,19 +344,7 @@ export function safeJson(value) {
 }
 
 export function isSafeCrawlerUrl(value) {
-  try {
-    const url = new URL(value);
-    if (!["http:", "https:"].includes(url.protocol)) return false;
-    if (PRIVATE_HOSTS.has(url.hostname.toLocaleLowerCase("en-US"))) return false;
-    const ipVersion = net.isIP(url.hostname);
-    if (ipVersion === 4) {
-      const parts = url.hostname.split(".").map(Number);
-      if (parts[0] === 10 || parts[0] === 127 || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || (parts[0] === 192 && parts[1] === 168)) return false;
-    }
-    return true;
-  } catch {
-    return false;
-  }
+  return isSafeUrl(value);
 }
 
 function sourceById(id) {
