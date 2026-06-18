@@ -13,6 +13,7 @@ import { assertProductionEnv } from "./config/env.mjs";
 import { adminAuth } from "./middleware/admin-auth.mjs";
 import { errorHandler } from "./middleware/error-handler.mjs";
 import { requestId } from "./middleware/request-id.mjs";
+import { paginatedResponse, parsePositiveInt, sendJsonWithEtag } from "./utils/api-response.mjs";
 import {
   AutomationQueue,
   JOB_TYPES,
@@ -925,7 +926,7 @@ function inferredTargetGroups(call) {
 }
 
 function filterCalls(calls, query = {}) {
-  const searchTerms = normalizeSearchText(query.q || query.search || "").split(" ").filter(Boolean);
+  const searchTerms = normalizeSearchText(query.q || query.search || query.query || "").split(" ").filter(Boolean);
   const scope = scopeFromParam(query.scope);
   const status = query.status || "open";
   const deadlineWithin = query.deadlineWithin ? Number(query.deadlineWithin) : null;
@@ -934,17 +935,21 @@ function filterCalls(calls, query = {}) {
   const institution = normalizeWhitespace(query.institution || "");
   const program = normalizeWhitespace(query.program || "");
   const supportType = normalizeWhitespace(query.supportType || "");
-  const targetGroup = normalizeSearchText(query.targetGroup || "");
+  const targetGroup = normalizeSearchText(query.targetGroup || query.audience || "");
   const thematicArea = normalizeSearchText(query.thematicArea || query.theme || "");
   const country = normalizeWhitespace(query.country || "");
   const currency = normalizeWhitespace(query.currency || "");
   const deadlineFrom = query.deadlineFrom ? new Date(query.deadlineFrom).getTime() : null;
   const deadlineTo = query.deadlineTo ? new Date(query.deadlineTo).getTime() : null;
+  const budgetMin = query.budgetMin ? Number(query.budgetMin) : null;
+  const budgetMax = query.budgetMax ? Number(query.budgetMax) : null;
 
   let result = calls.filter((call) => {
     const haystack = callSearchText(call);
     const left = daysUntil(call.deadline);
     const deadlineMs = call.deadline ? new Date(call.deadline).getTime() : null;
+    const callBudgetMin = Number(call.budgetMin ?? call.budgetMax ?? 0) || null;
+    const callBudgetMax = Number(call.budgetMax ?? call.budgetMin ?? 0) || null;
     return (
       (!searchTerms.length || searchTerms.every((term) => haystack.includes(term))) &&
       (!scope || scope === "Tümü" || call.scope === scope) &&
@@ -960,6 +965,8 @@ function filterCalls(calls, query = {}) {
       (!currency || call.currency === currency) &&
       (!deadlineFrom || (deadlineMs && deadlineMs >= deadlineFrom)) &&
       (!deadlineTo || (deadlineMs && deadlineMs <= deadlineTo)) &&
+      (!budgetMin || (callBudgetMax && callBudgetMax >= budgetMin)) &&
+      (!budgetMax || (callBudgetMin && callBudgetMin <= budgetMax)) &&
       (!deadlineWithin || (left !== null && left >= 0 && left <= deadlineWithin))
     );
   });
@@ -1163,21 +1170,36 @@ function broadcastRefresh() {
 
 app.get("/api/v1/calls", async (req, res) => {
   const payload = await getCachedCalls();
-  const page = Math.max(1, parseInt(req.query.page || "1", 10));
-  const limit = Math.max(1, Math.min(200, parseInt(req.query.limit || "50", 10)));
+  const page = parsePositiveInt(req.query.page, 1, { max: 100000 });
+  const limit = parsePositiveInt(req.query.pageSize ?? req.query.limit, 24, { max: 100 });
   const filtered = filterCalls(payload.calls, req.query);
   const paginated = filtered.slice((page - 1) * limit, page * limit);
 
-  res.set("Cache-Control", "no-store");
-  res.json({ 
-    ...payload, 
+  const response = paginatedResponse({
+    data: paginated,
+    page,
+    pageSize: limit,
+    total: filtered.length,
+    requestId: req.requestId,
+    generatedAt: payload.fetchedAt,
+    extraMeta: {
+      cache: payload.cache || null,
+      quality: payload.quality || null,
+    },
+  });
+
+  return sendJsonWithEtag(req, res, {
+    ...response,
+    errors: payload.errors || [],
+    fetchedAt: payload.fetchedAt,
+    quality: payload.quality,
+    automation: payload.automation,
     calls: paginated,
     pagination: {
-      total: filtered.length,
-      page,
+      ...response.pagination,
       limit,
-      pages: Math.ceil(filtered.length / limit)
-    }
+      pages: response.pagination.totalPages,
+    },
   });
 });
 
@@ -1202,6 +1224,18 @@ app.get("/api/v1/programmes", async (_req, res) => {
   const payload = await getCachedCalls();
   const programmes = [...new Set(payload.calls.map((call) => call.programme).filter(Boolean))].sort();
   res.json({ programmes });
+});
+
+app.get("/api/v1/programs", async (_req, res) => {
+  const payload = await getCachedCalls();
+  const programs = [...new Set(payload.calls.map((call) => call.programme).filter(Boolean))].sort();
+  res.json({ data: programs, programs, meta: { generatedAt: payload.fetchedAt } });
+});
+
+app.get("/api/v1/sources", async (_req, res) => {
+  const state = await loadAutomationState(AUTOMATION_STATE_PATH);
+  const sources = SOURCE_REGISTRY.map((source) => ({ ...source, ...(state.sources?.[source.id] || {}) }));
+  res.json({ data: sources, sources });
 });
 
 app.get("/api/v1/programmes/:id", async (req, res) => {
@@ -1303,6 +1337,16 @@ app.post("/api/v1/automation/manual-review/:id/:action", adminLimiter, adminAuth
   state.manualReviewQueue = items;
   await saveAutomationState(AUTOMATION_STATE_PATH, state);
   res.json({ item: items[index] });
+});
+
+app.post("/api/v1/automation/sources/:id/refresh", refreshLimiter, adminAuth, async (req, res) => {
+  const source = SOURCE_REGISTRY.find((item) => item.id === req.params.id);
+  if (!source) return res.status(404).json({ error: "source_not_found", requestId: req.requestId });
+  const payload = await getCachedCalls({ force: true });
+  return res.json({
+    data: { sourceId: source.id, refreshedAt: payload.fetchedAt },
+    meta: { generatedAt: new Date().toISOString(), requestId: req.requestId },
+  });
 });
 
 app.get("/api/v1/calendar", async (req, res) => {
