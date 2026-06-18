@@ -1882,11 +1882,145 @@ function ContactPage() {
   );
 }
 
+function PrivacyPolicyPage() {
+  usePageMeta(
+    "Gizlilik Politikası | Hibe Rota",
+    "Hibe Rota web sitesinin KVKK, GDPR ve genel uluslararası veri koruma ilkeleri doğrultusunda hazırlanan gizlilik politikası.",
+  );
+
+  const updatedAt = "18 Haziran 2026";
+  const sections = [
+    {
+      title: "1. Amaç ve kapsam",
+      body: [
+        "Bu Gizlilik Politikası, Hibe Rota web sitesini ziyaret eden kullanıcıların kişisel verilerinin hangi ilkelerle işlendiğini açıklamak için hazırlanmıştır.",
+        "Hibe Rota, üyelik veya kullanıcı profili gerektirmeyen; ulusal, Avrupa ve uluslararası hibe/çağrı bilgilerini kamuya açık kaynaklardan derleyen bir bilgilendirme platformudur.",
+      ],
+    },
+    {
+      title: "2. Veri sorumlusu ve iletişim",
+      body: [
+        "Bu web sitesi Veor Collection markası tarafından sunulan Hibe Rota hizmetidir. Gizlilik ve veri koruma talepleri için iletişim adresi: veordijital@gmail.com.",
+        "Bu politika, veri sorumlusunun KVKK kapsamındaki aydınlatma yükümlülüğü ve GDPR kapsamındaki şeffaf bilgilendirme ilkeleri dikkate alınarak hazırlanmıştır.",
+      ],
+    },
+    {
+      title: "3. İşlenen veri kategorileri",
+      body: [
+        "Hibe Rota kullanıcı hesabı, parola, profil, ödeme bilgisi veya özel nitelikli kişisel veri toplamaz.",
+        "Web sitesinin güvenli ve düzgün çalışması için IP adresi, tarayıcı/cihaz bilgisi, erişim zamanı, talep edilen sayfa, hata kayıtları ve güvenlik logları gibi teknik veriler sınırlı şekilde işlenebilir.",
+        "Kullanıcının arama ve filtre tercihleri kalıcı profil oluşturmak için değil, sayfa URL parametreleri ve tarayıcı deneyimi içinde kullanılır.",
+        "E-posta yoluyla bizimle iletişime geçerseniz, ileti içeriğinde paylaştığınız ad-soyad, e-posta adresi ve mesaj içeriği yalnızca talebinizi yanıtlamak için işlenir.",
+      ],
+    },
+    {
+      title: "4. İşleme amaçları",
+      body: [
+        "Siteyi yayınlamak, çağrı listesini göstermek, arama/filtreleme/export/RSS/takvim özelliklerini çalıştırmak.",
+        "Hizmet güvenliğini sağlamak, kötüye kullanımı ve yetkisiz admin erişimini önlemek, hata ayıklama ve performans iyileştirmesi yapmak.",
+        "Kullanıcı taleplerine yanıt vermek ve yasal yükümlülüklere uymak.",
+        "Kamuya açık hibe çağrısı kaynaklarını izleyerek başvuru ekiplerine güncel bilgilendirme sunmak.",
+      ],
+    },
+    {
+      title: "5. Hukuki sebepler",
+      body: [
+        "KVKK bakımından teknik loglar ve güvenlik kayıtları; bir hakkın tesisi, kullanılması veya korunması, veri sorumlusunun meşru menfaati ve hukuki yükümlülüklerin yerine getirilmesi kapsamında işlenebilir.",
+        "İletişim talepleri, talebinize cevap verilebilmesi için meşru menfaat veya sözleşme öncesi iletişim kapsamında işlenebilir.",
+        "GDPR bakımından uygulanabilir olduğu ölçüde işlemeler; meşru menfaat, hukuki yükümlülük ve kullanıcının talebine bağlı iletişim dayanaklarına dayanır.",
+      ],
+    },
+    {
+      title: "6. Çerezler ve benzer teknolojiler",
+      body: [
+        "Hibe Rota, temel site işlevleri, güvenlik, favori/tercih gibi yerel tarayıcı özellikleri ve performans için zorunlu veya işlevsel teknolojiler kullanabilir.",
+        "Zorunlu çerezler ve yerel depolama kayıtları siteyi çalıştırmak için kullanılır. Pazarlama, davranışsal reklam veya üçüncü taraf takip çerezi kullanılacak olursa önceden açık bilgilendirme ve gerekli hallerde rıza mekanizması sağlanır.",
+        "Tarayıcı ayarlarınızdan çerezleri silebilir veya engelleyebilirsiniz; ancak bazı site özellikleri sınırlı çalışabilir.",
+      ],
+    },
+    {
+      title: "7. Verilerin aktarılması",
+      body: [
+        "Kişisel veriler satılmaz, kiralanmaz veya reklam amaçlı üçüncü taraflarla paylaşılmaz.",
+        "Teknik barındırma, güvenlik, loglama, e-posta iletişimi veya hukuki yükümlülükler için hizmet alınan altyapı sağlayıcılarıyla sınırlı paylaşım yapılabilir.",
+        "Uluslararası veri aktarımı gerekirse KVKK, GDPR ve ilgili mevzuatta öngörülen güvenli aktarım mekanizmaları dikkate alınır.",
+      ],
+    },
+    {
+      title: "8. Saklama süreleri",
+      body: [
+        "Teknik loglar güvenlik, hata analizi ve yasal yükümlülükler için gerekli süre boyunca saklanır; ihtiyaç ortadan kalktığında silinir, anonimleştirilir veya mevzuata uygun şekilde imha edilir.",
+        "İletişim e-postaları, talebin yanıtlanması ve olası uyuşmazlıkların yönetimi için makul süreyle saklanır.",
+        "Kamuya açık hibe çağrısı verileri kişisel veri niteliğinde değilse çağrı geçmişi ve değişiklik takibi amacıyla tutulabilir.",
+      ],
+    },
+    {
+      title: "9. Güvenlik önlemleri",
+      body: [
+        "Admin işlemleri public arayüzden ayrıdır ve yetkisiz erişimi önlemek için kimlik doğrulama, rate limit, güvenlik başlıkları, URL güvenliği, log maskeleme ve düzenli audit kontrolleri uygulanır.",
+        "Veri işleme faaliyetleri veri minimizasyonu, amaçla sınırlılık, erişim kontrolü ve güncel güvenlik yamaları ilkeleriyle yürütülür.",
+      ],
+    },
+    {
+      title: "10. İlgili kişi hakları",
+      body: [
+        "KVKK madde 11 ve uygulanabilir olduğunda GDPR kapsamındaki haklarınız doğrultusunda; kişisel verilerinizin işlenip işlenmediğini öğrenme, bilgi talep etme, düzeltme, silme, işlemeyi kısıtlama, itiraz etme ve mevzuatta öngörülen diğer hakları kullanma imkanınız bulunur.",
+        "Taleplerinizi veordijital@gmail.com adresine iletebilirsiniz. Talebiniz, yürürlükteki mevzuatta öngörülen süreler ve kimlik doğrulama gereklilikleri dikkate alınarak değerlendirilir.",
+      ],
+    },
+    {
+      title: "11. Üçüncü taraf bağlantılar",
+      body: [
+        "Hibe Rota, TÜBİTAK, Avrupa Komisyonu, Eureka, Grants.gov ve benzeri resmi veya açık kaynaklara bağlantılar içerebilir.",
+        "Bu üçüncü taraf sitelerin gizlilik uygulamaları Hibe Rota’nın kontrolünde değildir. Başvuru yapmadan veya veri paylaşmadan önce ilgili resmi kaynağın gizlilik ve kullanım koşullarını incelemeniz önerilir.",
+      ],
+    },
+    {
+      title: "12. Politika değişiklikleri",
+      body: [
+        "Bu politika mevzuat, hizmet kapsamı veya teknik altyapı değişikliklerine göre güncellenebilir. Güncel sürüm bu sayfada yayımlandığı anda geçerli olur.",
+      ],
+    },
+  ];
+
+  return (
+    <>
+      <Breadcrumb items={[{ label: "Gizlilik Politikası" }]} />
+      <PageHero
+        eyebrow="KVKK ve GDPR uyumlu bilgilendirme"
+        title="Gizlilik Politikası"
+        text="Hibe Rota'nın public, üyelik gerektirmeyen yapısında hangi verilerin hangi amaçlarla işlendiğini ve haklarınızı açıklar."
+      />
+      <section className="content staticContent privacyPolicy">
+        <article>
+          <p><strong>Son güncelleme:</strong> {updatedAt}</p>
+          <p>
+            Bu metin, Hibe Rota web sitesinin mevcut teknik işleyişi esas alınarak hazırlanmış genel gizlilik politikasıdır. Kurumsal unvan, adres, KEP/e-posta veya özel veri işleme süreçleri değişirse bu sayfa güncellenmelidir.
+          </p>
+        </article>
+        {sections.map((section) => (
+          <article key={section.title}>
+            <h2>{section.title}</h2>
+            {section.body.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+          </article>
+        ))}
+        <article>
+          <h2>Dayanak alınan temel düzenlemeler</h2>
+          <ul>
+            <li>6698 sayılı Kişisel Verilerin Korunması Kanunu ve KVKK aydınlatma yükümlülüğü ilkeleri.</li>
+            <li>KVKK Çerez Uygulamaları Hakkında Rehber ilkeleri.</li>
+            <li>Avrupa Birliği Genel Veri Koruma Tüzüğü (GDPR) şeffaflık, veri minimizasyonu, amaçla sınırlılık ve ilgili kişi hakları ilkeleri.</li>
+          </ul>
+        </article>
+      </section>
+    </>
+  );
+}
+
 function StaticPage({ type }) {
   const pages = {
     "/hakkimizda": ["Hakkımızda", "Hibe Rota, ulusal ve uluslararası destek çağrılarını tek noktada izlenebilir hale getiren üyelik gerektirmeyen bir bilgilendirme platformudur.", "Canlı kaynak taraması, export, RSS ve takvim çıktılarıyla başvuru ekiplerinin güncel fırsatları kaçırmamasını hedefler."],
     "/sss": ["Sıkça Sorulan Sorular", "Veriler nereden geliyor?", "Çağrılar TÜBİTAK, Avrupa ve uluslararası açık kaynaklardan saatlik cache düzeniyle yenilenir."],
-    "/gizlilik-politikasi": ["Gizlilik Politikası", "Bu sürüm üyelik gerektirmez ve kullanıcı hesabı oluşturmaz.", "Arama ve filtre tercihleri yalnızca URL parametreleriyle çalışır; kişisel veri saklanmaz."],
     "/kullanim-kosullari": ["Kullanım Koşulları", "Portal bilgilendirme amacıyla sunulur.", "Başvuru öncesinde her çağrının resmi kaynak sayfasındaki güncel koşullar kontrol edilmelidir."],
   };
   const [title, text, extra] = pages[type] || pages["/hakkimizda"];
@@ -2063,7 +2197,8 @@ function App() {
   else if (route.pathname.startsWith("/rehber/")) page = <GuideArticlePage route={route} />;
   else if (route.pathname === "/admin") page = <AdminPage model={model} errors={errors} fetchedAt={fetchedAt} />;
   else if (route.pathname === "/iletisim") page = <ContactPage />;
-  else if (["/hakkimizda", "/sss", "/gizlilik-politikasi", "/kullanim-kosullari"].includes(route.pathname)) page = <StaticPage type={route.pathname} />;
+  else if (route.pathname === "/gizlilik-politikasi") page = <PrivacyPolicyPage />;
+  else if (["/hakkimizda", "/sss", "/kullanim-kosullari"].includes(route.pathname)) page = <StaticPage type={route.pathname} />;
   else page = <NotFoundPage />;
 
   return (
