@@ -3,12 +3,21 @@ import compression from "compression";
 import helmet from "helmet";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import * as cheerio from "cheerio";
 import JSZip from "jszip";
 import PDFDocument from "pdfkit";
+import morgan from "morgan";
+import rateLimit from "express-rate-limit";
+import "dotenv/config";
+import { assertProductionEnv } from "./config/env.mjs";
+import { adminAuth } from "./middleware/admin-auth.mjs";
+import { errorHandler } from "./middleware/error-handler.mjs";
+import { requestId } from "./middleware/request-id.mjs";
 import {
   AutomationQueue,
   JOB_TYPES,
   SOURCE_REGISTRY,
+  buildLinkCheckCandidates,
   buildAutomationMetrics,
   buildManualReviewItems,
   createSourceAdapters,
@@ -20,7 +29,17 @@ import {
   updateSourceHealth,
   verifyLinks,
 } from "./automation.mjs";
+import { GLOBAL_FUNDING_DATABASE, matchGlobalFundingDatabase } from "./fundingMatcher.mjs";
 import { createScraperStrategies } from "./scrapers/index.mjs";
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Unhandled Rejection at:", promise, "reason:", reason);
+});
+process.on("uncaughtException", (error) => {
+  console.error("Uncaught Exception thrown:", error);
+});
+
+assertProductionEnv();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -33,18 +52,103 @@ const CACHE_TTL_MS = Number(process.env.CALL_CACHE_TTL_MS || HOUR_MS);
 const SOURCE_TIMEOUT_MS = Number(process.env.SOURCE_TIMEOUT_MS || 12000);
 const MAX_AGE_IMMUTABLE = "1y";
 const AUTOMATION_STATE_PATH = process.env.AUTOMATION_STATE_PATH || path.join(root, ".hiberota", "automation-state.json");
+const MAX_URL_LENGTH = Number(process.env.MAX_URL_LENGTH || 2048);
+const MAX_JSON_BODY = process.env.MAX_JSON_BODY || "32kb";
+const MAX_SSE_CLIENTS = Number(process.env.MAX_SSE_CLIENTS || 100);
 
 const USER_AGENT =
-  process.env.SOURCE_USER_AGENT || "ProjeYakalama/1.0 (+project-call-monitor; contact: admin@example.com)";
+  process.env.SOURCE_USER_AGENT || "Hiberota/1.0 (+project-call-monitor; contact: admin@example.com)";
 
 let callCache = null;
 let callCachePromise = null;
 let hourlyRefreshTimer = null;
+let linkHealthTimer = null;
+let linkHealthWorkerRunning = false;
+let queueRestored = false;
 const automationQueue = new AutomationQueue({ concurrency: Number(process.env.CRAWLER_CONCURRENCY || 2) });
 
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
+app.use(requestId);
 app.use(compression());
+
+morgan.token("safe-url", (req) => {
+  const parsedUrl = new URL(req.originalUrl || req.url || "/", "http://localhost");
+  for (const key of ["api_key", "token", "access_token", "authorization"]) {
+    if (parsedUrl.searchParams.has(key)) parsedUrl.searchParams.set(key, "[redacted]");
+  }
+  return `${parsedUrl.pathname}${parsedUrl.search}`;
+});
+
+app.use(
+  morgan(":remote-addr - :remote-user [:date[clf]] \":method :safe-url HTTP/:http-version\" :status :res[content-length] \":referrer\" \":user-agent\"", {
+    skip: (req) => req.path === "/healthz",
+  }),
+);
+
+app.use((req, res, next) => {
+  if ((req.originalUrl || req.url || "").length > MAX_URL_LENGTH) return res.status(414).json({ error: "url_too_long" });
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), browsing-topics=()");
+  res.setHeader("X-Permitted-Cross-Domain-Policies", "none");
+  next();
+});
+
+app.use((req, res, next) => {
+  const allowed = new Set(["GET", "POST", "HEAD", "OPTIONS"]);
+  if (!allowed.has(req.method)) return res.status(405).json({ error: "method_not_allowed" });
+  next();
+});
+
+app.use((req, res, next) => {
+  if (req.method !== "GET" || !req.query) return next();
+  for (const [key, value] of Object.entries(req.query)) {
+    if (Array.isArray(value)) return res.status(400).json({ error: "invalid_query", field: key });
+    if (String(value ?? "").length > 512) return res.status(400).json({ error: "query_value_too_long", field: key });
+  }
+  next();
+});
+
+const apiLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "rate_limited" },
+});
+app.use("/api/", apiLimiter);
+
+const adminLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "admin_rate_limited" },
+});
+
+const refreshLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 6,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "refresh_rate_limited" },
+});
+
+const matchLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "match_rate_limited" },
+});
+
+const exportLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "export_rate_limited" },
+});
+
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -52,11 +156,21 @@ app.use(
         defaultSrc: ["'self'"],
         connectSrc: ["'self'"],
         imgSrc: ["'self'", "data:"],
-        scriptSrc: ["'self'"],
+        scriptSrc: isProd ? ["'self'"] : ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
+        fontSrc: ["'self'", "data:"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"],
+        frameAncestors: ["'none'"],
+        ...(isProd ? { upgradeInsecureRequests: [] } : {}),
       },
     },
     crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: "same-origin" },
+    frameguard: { action: "deny" },
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+    hsts: isProd ? { maxAge: 15552000, includeSubDomains: true } : false,
   }),
 );
 
@@ -69,7 +183,12 @@ function absoluteUrl(base, href) {
 }
 
 function normalizeWhitespace(value = "") {
-  return String(value).replace(/\s+/g, " ").trim();
+  return String(value).replace(/<[a-z/][^>]*>/gi, " ").replace(/\s+/g, " ").trim();
+}
+
+function normalizeBoundedText(value = "", maxLength = 500) {
+  if (typeof value !== "string") return "";
+  return normalizeWhitespace(value).slice(0, maxLength);
 }
 
 function normalizeQualityText(value = "") {
@@ -237,14 +356,21 @@ function qualityGateCalls(items) {
   return { calls, manualReviewCalls, rejected };
 }
 
-async function getHtml(url) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
-  const response = await fetch(url, { headers: { "user-agent": USER_AGENT }, signal: controller.signal }).finally(() => {
-    clearTimeout(timer);
-  });
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-  return response.text();
+async function getHtml(url, retries = 3) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS + (attempt * 5000));
+    try {
+      const response = await fetch(url, { headers: { "user-agent": USER_AGENT }, signal: controller.signal }).finally(() => {
+        clearTimeout(timer);
+      });
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      return await response.text();
+    } catch (err) {
+      if (attempt === retries) throw err;
+      await new Promise(resolve => setTimeout(resolve, 2000 * Math.pow(2, attempt)));
+    }
+  }
 }
 
 async function scrapeTubitak() {
@@ -521,6 +647,7 @@ function dedupe(items) {
 
 async function collectCalls() {
   const state = await loadAutomationState(AUTOMATION_STATE_PATH);
+  restoreAutomationQueue(state);
   const adapters = createSourceAdapters(createScraperStrategies());
   const errors = [];
   const calls = [];
@@ -567,16 +694,18 @@ async function collectCalls() {
   const duplicateResult = dedupeAndFlag(acceptedCalls);
   const previousCalls = state.calls || {};
   const changeLogs = detectChanges(previousCalls, duplicateResult.calls);
-  const linkHealthChecks = await verifyLinks(duplicateResult.calls);
+  const linkHealthChecks = recentLinkHealthChecks(state.linkHealthChecks || [], duplicateResult.calls);
   const reviewItems = buildManualReviewItems(duplicateResult.calls, duplicateResult.duplicates, linkHealthChecks);
+  enqueueLinkHealthJobs(duplicateResult.calls);
   state.calls = Object.fromEntries(duplicateResult.calls.map((call) => [call.id, call]));
   state.duplicates = duplicateResult.duplicates;
   state.callChangeLogs = [...(state.callChangeLogs || []), ...changeLogs].slice(-1000);
-  state.linkHealthChecks = [...(state.linkHealthChecks || []), ...linkHealthChecks].slice(-1000);
+  state.linkHealthChecks = (state.linkHealthChecks || []).slice(-1000);
   state.manualReviewQueue = mergeManualReviewQueue(state.manualReviewQueue || [], reviewItems);
-  state.crawlerJobs = automationQueue.snapshot().processed;
+  state.crawlerJobs = automationQueue.persistableSnapshot();
   state.metrics = buildAutomationMetrics(state, duplicateResult.calls);
   await saveAutomationState(AUTOMATION_STATE_PATH, state);
+  scheduleLinkHealthWorker(duplicateResult.calls);
   const publishedCalls = duplicateResult.calls.filter((call) => call.isPublished);
   return {
     calls: publishedCalls,
@@ -597,6 +726,80 @@ async function collectCalls() {
   };
 }
 
+function restoreAutomationQueue(state = {}) {
+  if (queueRestored) return;
+  automationQueue.restore(state.crawlerJobs || {});
+  queueRestored = true;
+}
+
+function enqueueLinkHealthJobs(calls = []) {
+  for (const candidate of buildLinkCheckCandidates(calls)) {
+    automationQueue.enqueue({
+      type: JOB_TYPES.VERIFY_LINKS,
+      sourceId: "",
+      url: candidate.url,
+      priority: 9,
+      payload: candidate,
+      idempotencyKey: `${JOB_TYPES.VERIFY_LINKS}:${candidate.callId}:${candidate.type}:${candidate.url}`,
+      timeoutMs: Number(process.env.LINK_VERIFY_TIMEOUT_MS || 5000),
+    });
+  }
+}
+
+function recentLinkHealthChecks(checks = [], calls = []) {
+  const liveIds = new Set(calls.map((call) => call.id));
+  const maxAgeMs = Number(process.env.LINK_HEALTH_MAX_AGE_MS || 24 * HOUR_MS);
+  const cutoff = Date.now() - maxAgeMs;
+  const byKey = new Map();
+  for (const check of checks) {
+    if (!liveIds.has(check.callId)) continue;
+    if (new Date(check.checkedAt || 0).getTime() < cutoff) continue;
+    const key = `${check.callId}:${check.type}:${check.url}`;
+    const previous = byKey.get(key);
+    if (!previous || new Date(check.checkedAt).getTime() > new Date(previous.checkedAt).getTime()) byKey.set(key, check);
+  }
+  return [...byKey.values()];
+}
+
+function scheduleLinkHealthWorker(calls = []) {
+  if (linkHealthTimer) return;
+  linkHealthTimer = setTimeout(() => {
+    linkHealthTimer = null;
+    runLinkHealthWorker(calls).catch((error) => console.error(`Link health worker failed: ${error.message}`));
+  }, Number(process.env.LINK_HEALTH_WORKER_DELAY_MS || 1000));
+}
+
+async function runLinkHealthWorker(calls = []) {
+  if (linkHealthWorkerRunning || !calls.length) return;
+  linkHealthWorkerRunning = true;
+  try {
+    const state = await loadAutomationState(AUTOMATION_STATE_PATH);
+    restoreAutomationQueue(state);
+    const candidates = buildLinkCheckCandidates(calls, { limit: Number(process.env.LINK_HEALTH_WORKER_LIMIT || process.env.LINK_VERIFY_LIMIT || 25) });
+    const checks = await verifyLinks(calls, {
+      timeoutMs: Number(process.env.LINK_VERIFY_TIMEOUT_MS || 5000),
+      candidates,
+    });
+    for (const check of checks) {
+      automationQueue.completeByIdempotencyKey(
+        `${JOB_TYPES.VERIFY_LINKS}:${check.callId}:${check.type}:${check.url}`,
+        { status: check.status, httpStatus: check.httpStatus || null },
+      );
+    }
+    const currentCalls = Object.values(state.calls || {});
+    state.linkHealthChecks = [...(state.linkHealthChecks || []), ...checks].slice(-1000);
+    state.manualReviewQueue = mergeManualReviewQueue(
+      state.manualReviewQueue || [],
+      buildManualReviewItems(currentCalls, state.duplicates || [], recentLinkHealthChecks(state.linkHealthChecks, currentCalls)),
+    );
+    state.crawlerJobs = automationQueue.persistableSnapshot();
+    state.metrics = buildAutomationMetrics(state, currentCalls);
+    await saveAutomationState(AUTOMATION_STATE_PATH, state);
+  } finally {
+    linkHealthWorkerRunning = false;
+  }
+}
+
 async function getCachedCalls({ force = false } = {}) {
   const now = Date.now();
   if (!force && callCache && now - callCache.cachedAtMs < CACHE_TTL_MS) {
@@ -611,6 +814,7 @@ async function getCachedCalls({ force = false } = {}) {
   callCachePromise = collectCalls()
     .then((payload) => {
       callCache = { payload, cachedAtMs: Date.now() };
+      if (typeof broadcastRefresh === "function") broadcastRefresh();
       return payload;
     })
     .finally(() => {
@@ -792,16 +996,17 @@ function exportRows(calls) {
     "Açılış tarihi": call.publishedAt || "",
     "Son başvuru tarihi": call.deadline || "",
     "Kalan gün": daysUntil(call.deadline) ?? "",
-    "Destek türü": call.category,
-    "Destek miktarı": call.support,
-    "Para birimi": call.support?.match(/€|EUR|₺|TL|\$|USD/i)?.[0] || "",
+    "Destek türü": call.supportType || call.category,
+    "Destek miktarı": call.budgetMax ? `${Number(call.budgetMax).toLocaleString("tr-TR")} ${call.currency || ""}`.trim() : call.support || "",
+    "Destek oranı": call.supportRate ? `%${call.supportRate}` : "",
+    "Para birimi": call.currency || "",
     "Hedef kitle": "",
     "Tematik alan": call.category,
     "Türkiye uygunluğu": call.scope === "Ulusal" || call.scope === "Avrupa" ? "Kontrol edilmeli" : "Kaynak detayında kontrol edilmeli",
     "Ortaklık şartı": "",
-    "Resmî çağrı bağlantısı": call.url,
-    "Başvuru bağlantısı": call.url,
-    "Son kontrol tarihi": new Date().toISOString(),
+    "Resmî çağrı bağlantısı": call.officialUrl || call.url,
+    "Başvuru bağlantısı": call.applicationUrl || call.url,
+    "Son kontrol tarihi": call.lastVerifiedAt || new Date().toISOString(),
   }));
 }
 
@@ -862,7 +1067,7 @@ function makeIcs(call) {
     "VERSION:2.0",
     "PRODID:-//Hibe Rota//TR",
     "BEGIN:VEVENT",
-    `UID:${call.id}@proje-yakalama`,
+    `UID:${call.id}@hiberota`,
     `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z")}`,
     `DTSTART;VALUE=DATE:${ymd}`,
     `SUMMARY:${call.title}`,
@@ -890,7 +1095,7 @@ app.get("/api/calls", async (_req, res) => {
   }
 });
 
-app.post("/api/calls/refresh", async (_req, res) => {
+app.post("/api/calls/refresh", refreshLimiter, adminAuth, async (_req, res) => {
   try {
     res.set("Cache-Control", "no-store");
     res.json(await getCachedCalls({ force: true }));
@@ -936,22 +1141,56 @@ app.get("/api/calls/:slug/similar", async (req, res) => {
   res.json({ calls: similarPublicCalls(call, payload.calls) });
 });
 
+let sseClients = [];
+app.get("/api/v1/stream", (req, res) => {
+  if (sseClients.length >= MAX_SSE_CLIENTS) return res.status(429).json({ error: "too_many_stream_clients" });
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+  
+  const clientId = Date.now();
+  sseClients.push({ id: clientId, res });
+  
+  req.on("close", () => {
+    sseClients = sseClients.filter(c => c.id !== clientId);
+  });
+});
+
+function broadcastRefresh() {
+  sseClients.forEach(c => c.res.write(`data: {"type": "refresh"}\n\n`));
+}
+
 app.get("/api/v1/calls", async (req, res) => {
   const payload = await getCachedCalls();
+  const page = Math.max(1, parseInt(req.query.page || "1", 10));
+  const limit = Math.max(1, Math.min(200, parseInt(req.query.limit || "50", 10)));
+  const filtered = filterCalls(payload.calls, req.query);
+  const paginated = filtered.slice((page - 1) * limit, page * limit);
+
   res.set("Cache-Control", "no-store");
-  res.json({ ...payload, calls: filterCalls(payload.calls, req.query) });
+  res.json({ 
+    ...payload, 
+    calls: paginated,
+    pagination: {
+      total: filtered.length,
+      page,
+      limit,
+      pages: Math.ceil(filtered.length / limit)
+    }
+  });
 });
 
 app.get("/api/v1/calls/:id", async (req, res) => {
   const payload = await getCachedCalls();
-  const call = payload.calls.find((item) => item.id === req.params.id);
+  const call = findPublicCall(payload.calls, decodeURIComponent(req.params.id));
   if (!call) return res.status(404).json({ error: "call_not_found" });
   return res.json(call);
 });
 
 app.get("/api/v1/calls/:id/similar", async (req, res) => {
   const payload = await getCachedCalls();
-  const call = payload.calls.find((item) => item.id === req.params.id);
+  const call = findPublicCall(payload.calls, decodeURIComponent(req.params.id));
   if (!call) return res.status(404).json({ error: "call_not_found" });
   const similar = payload.calls
     .filter((item) => item.id !== call.id && (item.scope === call.scope || item.category === call.category || item.funder === call.funder))
@@ -959,12 +1198,17 @@ app.get("/api/v1/calls/:id/similar", async (req, res) => {
   return res.json({ calls: similar });
 });
 
-app.get("/api/v1/programmes", (_req, res) => {
-  res.json({ programmes: [] });
+app.get("/api/v1/programmes", async (_req, res) => {
+  const payload = await getCachedCalls();
+  const programmes = [...new Set(payload.calls.map((call) => call.programme).filter(Boolean))].sort();
+  res.json({ programmes });
 });
 
-app.get("/api/v1/programmes/:id", (req, res) => {
-  res.status(404).json({ error: "programme_not_found", id: req.params.id });
+app.get("/api/v1/programmes/:id", async (req, res) => {
+  const payload = await getCachedCalls();
+  const calls = payload.calls.filter((call) => slug(call.programme) === req.params.id || call.programme === req.params.id);
+  if (!calls.length) return res.status(404).json({ error: "programme_not_found" });
+  res.json({ id: req.params.id, name: calls[0].programme, calls });
 });
 
 app.get("/api/v1/funders", async (_req, res) => {
@@ -1043,7 +1287,7 @@ app.get("/api/v1/automation/jobs", (_req, res) => {
   res.json({ queue: automationQueue.snapshot(), supportedJobTypes: Object.values(JOB_TYPES) });
 });
 
-app.post("/api/v1/automation/manual-review/:id/:action", express.json(), async (req, res) => {
+app.post("/api/v1/automation/manual-review/:id/:action", adminLimiter, adminAuth, express.json({ limit: MAX_JSON_BODY, strict: true }), async (req, res) => {
   const allowed = new Set(["approve", "edit", "reject", "merge", "rescan", "unpublish", "archive", "trust-source"]);
   if (!allowed.has(req.params.action)) return res.status(400).json({ error: "unsupported_action" });
   const state = await loadAutomationState(AUTOMATION_STATE_PATH);
@@ -1053,7 +1297,7 @@ app.post("/api/v1/automation/manual-review/:id/:action", express.json(), async (
   items[index] = {
     ...items[index],
     status: req.params.action,
-    note: req.body?.note || "",
+    note: normalizeBoundedText(req.body?.note || "", 1000),
     updatedAt: new Date().toISOString(),
   };
   state.manualReviewQueue = items;
@@ -1076,21 +1320,27 @@ app.get("/api/v1/search/suggestions", async (req, res) => {
   res.json({ suggestions });
 });
 
-app.post("/api/v1/match", express.json(), async (req, res) => {
+app.get("/api/v1/funding-database", (_req, res) => {
+  res.json({ items: GLOBAL_FUNDING_DATABASE });
+});
+
+app.post("/api/v1/match", matchLimiter, express.json({ limit: MAX_JSON_BODY, strict: true }), async (req, res) => {
   const payload = await getCachedCalls();
-  const preferredScopes = (req.body?.preferredScopes || []).map(scopeFromParam);
-  const themes = req.body?.themes || [];
+  const body = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
+  const preferredScopes = Array.isArray(body.preferredScopes) ? body.preferredScopes.slice(0, 10).map(scopeFromParam) : [];
+  const themes = Array.isArray(body.themes) ? body.themes.slice(0, 20).map((theme) => normalizeBoundedText(theme, 100)).filter(Boolean) : [];
+  const globalFunding = matchGlobalFundingDatabase(body);
   const calls = payload.calls
     .filter((call) => call.status === "open")
     .filter((call) => !preferredScopes.length || preferredScopes.includes(call.scope))
     .filter((call) => !themes.length || themes.some((theme) => `${call.category} ${call.title}`.toLocaleLowerCase("tr-TR").includes(String(theme).toLocaleLowerCase("tr-TR"))))
     .slice(0, 50);
-  res.json({ calls, saved: false });
+  res.json({ calls, globalFunding, saved: false });
 });
 
 app.get("/api/v1/calls/:id/calendar.ics", async (req, res) => {
   const payload = await getCachedCalls();
-  const call = payload.calls.find((item) => item.id === req.params.id);
+  const call = findPublicCall(payload.calls, decodeURIComponent(req.params.id));
   if (!call) return res.status(404).send("Not found");
   res.setHeader("Content-Type", "text/calendar; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="${slug(call.id).replace(/[^a-z0-9-]/gi, "") || "cagri"}.ics"`);
@@ -1117,9 +1367,9 @@ async function exportCalls(req, res, format) {
   return res.send(buffer);
 }
 
-app.get("/api/v1/exports/calls.csv", (req, res) => exportCalls(req, res, "csv"));
-app.get("/api/v1/exports/calls.xlsx", (req, res) => exportCalls(req, res, "xlsx"));
-app.get("/api/v1/exports/calls.pdf", (req, res) => exportCalls(req, res, "pdf"));
+app.get("/api/v1/exports/calls.csv", exportLimiter, (req, res) => exportCalls(req, res, "csv"));
+app.get("/api/v1/exports/calls.xlsx", exportLimiter, (req, res) => exportCalls(req, res, "xlsx"));
+app.get("/api/v1/exports/calls.pdf", exportLimiter, (req, res) => exportCalls(req, res, "pdf"));
 
 app.get(["/rss/all.xml", "/rss/tum-cagrilar.xml"], async (req, res) => {
   const payload = await getCachedCalls();
@@ -1152,6 +1402,9 @@ app.get("/healthz", (_req, res) => {
     automation: callCache?.payload?.automation?.metrics || null,
   });
 });
+
+app.use("/api", errorHandler);
+app.use("/rss", errorHandler);
 
 if (isProd) {
   app.use(

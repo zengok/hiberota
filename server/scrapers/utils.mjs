@@ -1,7 +1,7 @@
 import * as cheerio from "cheerio";
 
 export const USER_AGENT =
-  process.env.SOURCE_USER_AGENT || "ProjeYakalama/1.0 (+project-call-monitor; contact: admin@example.com)";
+  process.env.SOURCE_USER_AGENT || "Hiberota/1.0 (+project-call-monitor; contact: admin@example.com)";
 
 export const SOURCE_TIMEOUT_MS = Number(process.env.SOURCE_TIMEOUT_MS || 12000);
 

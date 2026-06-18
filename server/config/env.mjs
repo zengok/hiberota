@@ -18,7 +18,8 @@ export const env = {
 
 export function assertProductionEnv() {
   if (!env.isProduction) return;
-  const missing = ["SESSION_SECRET"].filter((key) => !process.env[key]);
+  const missing = [];
+  if (!process.env.ADMIN_API_TOKEN && !process.env.ADMIN_API_KEY) missing.push("ADMIN_API_TOKEN");
   if (missing.length) {
     throw new Error(`Missing production environment variables: ${missing.join(", ")}`);
   }

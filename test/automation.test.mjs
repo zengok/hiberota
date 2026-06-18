@@ -1,11 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  AutomationQueue,
+  buildLinkCheckCandidates,
   classifyPageType,
   computeStatus,
   contentHash,
   dedupeAndFlag,
+  extractFundingDetails,
   isSafeCrawlerUrl,
+  mergeManualReviewQueue,
   matchFundingSource,
   normalizeCallRecord,
   parseImportantDates,
@@ -24,6 +28,7 @@ test("parses Turkish and ISO deadline dates with time evidence", () => {
 test("computes status from dates and extension/cancellation text", () => {
   assert.equal(computeStatus({ title: "Çağrı", deadline: "2099-07-01T00:00:00.000Z" }), "OPEN");
   assert.equal(computeStatus({ title: "Başvuru süresi uzatılmıştır", deadline: "2099-07-01T00:00:00.000Z" }), "EXTENDED");
+  assert.equal(computeStatus({ title: "Başvuru takvimi güncellenerek ileri bir tarihe alınmıştır" }), "EXTENDED");
   assert.equal(computeStatus({ title: "Çağrı iptal edilmiştir" }), "CANCELLED");
 });
 
@@ -59,6 +64,32 @@ test("normalizes legacy call without breaking core fields", () => {
   assert.equal(call.normalizedStatus, "OPEN");
   assert.ok(call.confidenceScore >= 75);
   assert.ok(call.evidence.deadline);
+});
+
+test("extracts grant amount and support rate from Turkish funding text", () => {
+  const details = extractFundingDetails("Program kapsamında azami destek bütçesi 1.500.000 TL olup destek oranı %75 olarak uygulanır.");
+  assert.equal(details.budgetMax, 1500000);
+  assert.equal(details.currency, "TRY");
+  assert.equal(details.supportRate, 75);
+});
+
+test("normalization fills budget fields from support and description text", () => {
+  const call = normalizeCallRecord({
+    title: "KOBİ Ar-Ge çağrısı",
+    funder: "TÜBİTAK",
+    source: "TÜBİTAK Duyurular",
+    url: "https://tubitak.gov.tr/tr/duyuru/kobi-arge",
+    summary: "Son başvuru 01.07.2099",
+    description: "Çağrı için hibe miktarı en fazla 2 milyon TL, destek oranı yüzde 60 olarak belirlenmiştir.",
+    support: "Resmî çağrı metninde belirtilir",
+    deadline: "2099-07-01T00:00:00.000Z",
+    status: "open",
+  });
+
+  assert.equal(call.budgetMax, 2000000);
+  assert.equal(call.currency, "TRY");
+  assert.equal(call.supportRate, 60);
+  assert.match(call.support, /2\.000\.000 TL/);
 });
 
 test("matches official funding source and auto publishes verified calls", () => {
@@ -127,4 +158,52 @@ test("blocks unsafe crawler URLs", () => {
   assert.equal(isSafeCrawlerUrl("https://example.com/call"), true);
   assert.equal(isSafeCrawlerUrl("file:///etc/passwd"), false);
   assert.equal(isSafeCrawlerUrl("http://127.0.0.1:3000"), false);
+});
+
+test("manual review queue drops stale pending items and preserves resolved decisions", () => {
+  const merged = mergeManualReviewQueue(
+    [
+      { id: "review-stale", status: "pending", title: "Old item", reasons: ["LOW_CONFIDENCE"] },
+      { id: "review-current", status: "approve", title: "Current item", note: "accepted", reasons: ["LOW_CONFIDENCE"] },
+    ],
+    [
+      { id: "review-current", status: "pending", title: "Current item updated", reasons: ["MISSING_DEADLINE"] },
+      { id: "review-new", status: "pending", title: "New item", reasons: ["LOW_CONFIDENCE"] },
+    ],
+  );
+
+  assert.equal(merged.some((item) => item.id === "review-stale"), false);
+  assert.equal(merged.find((item) => item.id === "review-current").status, "approve");
+  assert.deepEqual(merged.find((item) => item.id === "review-current").reasons, ["MISSING_DEADLINE"]);
+  assert.equal(merged.find((item) => item.id === "review-new").status, "pending");
+});
+
+test("automation queue restores pending, running, and processed job snapshots", () => {
+  const queue = new AutomationQueue({ concurrency: 1 });
+  queue.enqueue({ type: "FETCH_LIST_PAGE", sourceId: "tubitak", url: "https://tubitak.gov.tr/tr/duyuru" });
+  const running = queue.takeReady();
+  queue.enqueue({ type: "VERIFY_LINKS", url: "https://example.com/call", priority: 9 });
+  queue.complete(running, { count: 1 });
+
+  const restored = new AutomationQueue({ concurrency: 1 });
+  restored.restore(queue.persistableSnapshot());
+  const snapshot = restored.snapshot();
+
+  assert.equal(snapshot.processed.length, 1);
+  assert.equal(snapshot.pendingJobs.length, 1);
+  assert.equal(snapshot.pendingJobs[0].type, "VERIFY_LINKS");
+});
+
+test("link check candidates are safe, deduped, and limit-aware", () => {
+  const candidates = buildLinkCheckCandidates([
+    {
+      id: "a",
+      url: "https://example.com/a",
+      officialUrl: "https://example.com/a",
+      applicationUrl: "http://127.0.0.1/internal",
+      guideUrl: "https://example.com/guide.pdf",
+    },
+  ], { limit: 5 });
+
+  assert.deepEqual(candidates.map((item) => item.type), ["official", "guide"]);
 });

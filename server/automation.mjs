@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import net from "node:net";
+import { loadStateFromDb, saveStateToDb } from "./db.mjs";
 
 export const JOB_TYPES = {
   DISCOVER_SOURCE: "DISCOVER_SOURCE",
@@ -512,7 +513,7 @@ export function classifyPageType({ title = "", text = "", url = "" } = {}) {
   if (pdf) return { pageType: PAGE_TYPES.PDF_DOCUMENT, confidence: 0.98 };
   if (/(sonu[çc](?:lar[ıi])?\s+a[çc][ıi]kland[ıi]|[öo]n\s+de[ğg]erlendirme|kazanan|finalist)/i.test(haystack)) return { pageType: PAGE_TYPES.RESULT_ANNOUNCEMENT, confidence: 0.96 };
   if (/(iptal\s+edil|cancelled|canceled)/i.test(haystack)) return { pageType: PAGE_TYPES.CANCELLATION, confidence: 0.95 };
-  if (/(s[üu]re\s+uzat[ıi]ld[ıi]|deadline\s+extended|extension\s+of\s+deadline)/i.test(haystack)) return { pageType: PAGE_TYPES.DEADLINE_EXTENSION, confidence: 0.95 };
+  if (/(s[üu]re\s+uzat[ıi]ld[ıi]|ba[şs]vuru\s+takvimi\s+g[üu]ncell|ileri\s+bir\s+tarihe\s+al[ıi]n|deadline\s+extended|extension\s+of\s+deadline)/i.test(haystack)) return { pageType: PAGE_TYPES.DEADLINE_EXTENSION, confidence: 0.95 };
   if (/(ba[şs]vuru\s+formu|application\s+form)/i.test(haystack)) return { pageType: PAGE_TYPES.APPLICATION_FORM, confidence: 0.9 };
   if (/(ba[şs]vuru\s+rehberi|uygulama\s+esaslar[ıi]|application\s+guide|guideline)/i.test(haystack)) return { pageType: PAGE_TYPES.APPLICATION_GUIDE, confidence: 0.88 };
   if (/(a[çc][ıi]k\s+[çc]a[ğg]r[ıi]|son\s+ba[şs]vuru|open\s+call|call\s+for\s+proposals|funding\s+opportunity|deadline)/i.test(haystack)) return { pageType: PAGE_TYPES.CALL_DETAIL, confidence: 0.86 };
@@ -619,7 +620,7 @@ export function computeStatus(call, now = new Date()) {
   if (/(iptal\s+edil|cancelled|canceled)/i.test(text)) return NORMALIZED_STATUSES.CANCELLED;
   if (/(ask[ıi]ya\s+al[ıi]n|paused|suspended)/i.test(text)) return NORMALIZED_STATUSES.PAUSED;
   if (/(sonu[çc](?:lar[ıi])?\s+a[çc][ıi]kland[ıi]|result\s+published)/i.test(text)) return NORMALIZED_STATUSES.RESULT_PUBLISHED;
-  if (/(s[üu]re(?:si)?\s+uzat[ıi](?:ld[ıi]|lm[ıi][şs]t[ıi]r)|uzat[ıi](?:ld[ıi]|lm[ıi][şs]t[ıi]r)|deadline\s+extended)/i.test(text)) return NORMALIZED_STATUSES.EXTENDED;
+  if (/(s[üu]re(?:si)?\s+uzat[ıi](?:ld[ıi]|lm[ıi][şs]t[ıi]r)|uzat[ıi](?:ld[ıi]|lm[ıi][şs]t[ıi]r)|ba[şs]vuru\s+takvimi\s+g[üu]ncell|ileri\s+bir\s+tarihe\s+al[ıi]n|deadline\s+extended)/i.test(text)) return NORMALIZED_STATUSES.EXTENDED;
 
   const opening = call.openingDate ? new Date(call.openingDate) : null;
   const deadline = call.deadline ? new Date(call.deadline) : null;
@@ -664,11 +665,107 @@ export function scoreConfidence(call, source, institutionMatch = call.institutio
   return Math.max(0, Math.min(100, Math.round(sourceMatchScore * 0.7 + Math.max(0, qualityScore) * 0.3)));
 }
 
+const MONEY_PATTERN = /(?:(€|EUR|₺|TL|TRY|\$|USD)\s*)?(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?|\d+(?:[.,]\d+)?)(?:\s*(bin|thousand|milyon|million|milyar|billion))?\s*(€|EUR|₺|TL|TRY|\$|USD)?/gi;
+
+function currencyFromToken(token = "") {
+  const value = token.toLocaleUpperCase("tr-TR");
+  if (["₺", "TL", "TRY"].includes(value)) return "TRY";
+  if (["€", "EUR"].includes(value)) return "EUR";
+  if (["$", "USD"].includes(value)) return "USD";
+  return "";
+}
+
+function currencyDisplay(currency = "") {
+  return { TRY: "TL", EUR: "EUR", USD: "USD" }[currency] || currency;
+}
+
+function parseLocalizedNumber(value = "") {
+  const text = String(value).trim();
+  if (!text) return null;
+  const commaCount = (text.match(/,/g) || []).length;
+  const dotCount = (text.match(/\./g) || []).length;
+  if (dotCount > 1 && commaCount === 0) {
+    const number = Number(text.replace(/\./g, ""));
+    return Number.isFinite(number) ? number : null;
+  }
+  if (commaCount > 1 && dotCount === 0) {
+    const number = Number(text.replace(/,/g, ""));
+    return Number.isFinite(number) ? number : null;
+  }
+  const lastComma = text.lastIndexOf(",");
+  const lastDot = text.lastIndexOf(".");
+  let normalized = text;
+  if (lastComma > lastDot) normalized = text.replace(/\./g, "").replace(",", ".");
+  else normalized = text.replace(/,/g, "");
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : null;
+}
+
+function amountMultiplier(unit = "") {
+  const value = unit.toLocaleLowerCase("tr-TR");
+  if (["bin", "thousand"].includes(value)) return 1_000;
+  if (["milyon", "million"].includes(value)) return 1_000_000;
+  if (["milyar", "billion"].includes(value)) return 1_000_000_000;
+  return 1;
+}
+
+function isFundingContext(text = "", index = 0) {
+  const window = text.slice(Math.max(0, index - 90), index + 120).toLocaleLowerCase("tr-TR");
+  return /(destek|hibe|b[üu]t[çc]e|fon|fund|grant|budget|finansman|katk[ıi]|azami|maksimum|max|üst\s+limit|limit)/i.test(window);
+}
+
+export function extractFundingDetails(text = "") {
+  const clean = normalizeText(text);
+  const amounts = [];
+  for (const match of clean.matchAll(MONEY_PATTERN)) {
+    const currency = currencyFromToken(match[1] || match[4] || "");
+    if (!currency || !isFundingContext(clean, match.index || 0)) continue;
+    const base = parseLocalizedNumber(match[2]);
+    if (!base) continue;
+    amounts.push({
+      value: Math.round(base * amountMultiplier(match[3] || "")),
+      currency,
+      rawText: normalizeText(clean.slice(Math.max(0, (match.index || 0) - 70), Math.min(clean.length, (match.index || 0) + match[0].length + 90))),
+      index: match.index || 0,
+    });
+  }
+
+  const rateMatch =
+    clean.match(/(?:destek|hibe|fonlama|funding|grant|co[-\s]?funding)[^.%\n]{0,80}?(?:%|y[üu]zde\s*)(\d{1,3})(?:[.,](\d{1,2}))?/i) ||
+    clean.match(/(?:%|y[üu]zde\s*)(\d{1,3})(?:[.,](\d{1,2}))?[^.\n]{0,80}?(?:destek|hibe|fonlama|funding|grant|co[-\s]?funding)/i);
+  const supportRate = rateMatch ? Number(`${rateMatch[1]}.${rateMatch[2] || 0}`) : null;
+  const saneRate = supportRate && supportRate > 0 && supportRate <= 100 ? supportRate : null;
+  const byCurrency = amounts.length ? amounts.filter((item) => item.currency === amounts[0].currency) : [];
+  const values = byCurrency.map((item) => item.value).sort((a, b) => a - b);
+  const budgetMin = values.length > 1 ? values[0] : null;
+  const budgetMax = values.at(-1) || null;
+  const currency = byCurrency[0]?.currency || "";
+  const support = budgetMax
+    ? `${budgetMax.toLocaleString("tr-TR")} ${currencyDisplay(currency)}${budgetMin ? ` üst limit, alt limit ${budgetMin.toLocaleString("tr-TR")} ${currencyDisplay(currency)}` : ""}`
+    : "";
+  return {
+    budgetMin,
+    budgetMax,
+    currency,
+    supportRate: saneRate,
+    support,
+    evidence: {
+      ...(budgetMax ? { budget: { value: budgetMax, rawText: byCurrency.at(-1)?.rawText || "", confidence: 0.82 } } : {}),
+      ...(saneRate ? { supportRate: { value: saneRate, rawText: rateMatch?.[0] || "", confidence: 0.78 } } : {}),
+    },
+  };
+}
+
+function isGenericSupportText(value = "") {
+  return !value || /belirtilir|dok[üu]man|detay|de[ğg]i[şs]ir|ko[şs]ullar[ıi]na\s+g[öo]re|aktif\s+[çc]a[ğg]r[ıi]/i.test(value);
+}
+
 export function normalizeCallRecord(call, { source = null, previousCall = null, detectedAt = new Date().toISOString() } = {}) {
   const resolvedSource = source || findSourceForCall(call);
   const sourceId = call.sourceId || resolvedSource?.id || "unknown";
   const title = normalizeText(call.title);
-  const rawText = normalizeText(`${title} ${call.summary || ""} ${call.support || ""}`);
+  const rawText = normalizeText(`${title} ${call.summary || ""} ${call.description || ""} ${call.support || ""}`);
+  const fundingDetails = extractFundingDetails(rawText);
   const dates = parseImportantDates(rawText, { timezone: resolvedSource?.timezone || "Europe/Istanbul" });
   const deadlineEvidence =
     (call.deadline && {
@@ -728,10 +825,11 @@ export function normalizeCallRecord(call, { source = null, previousCall = null, 
     eligibleCountries: call.eligibleCountries || [],
     eligibleInstitutions: call.eligibleInstitutions || [],
     supportType: call.supportType || call.category || "",
-    budgetMin: call.budgetMin || null,
-    budgetMax: call.budgetMax || null,
-    currency: call.currency || call.support?.match(/€|EUR|₺|TL|\$|USD/i)?.[0] || "",
-    supportRate: call.supportRate || null,
+    support: !isGenericSupportText(call.support) ? call.support : fundingDetails.support || call.support || "",
+    budgetMin: call.budgetMin ?? fundingDetails.budgetMin,
+    budgetMax: call.budgetMax ?? fundingDetails.budgetMax,
+    currency: call.currency || fundingDetails.currency || "",
+    supportRate: call.supportRate ?? fundingDetails.supportRate,
     projectDuration: call.projectDuration || "",
     description: call.description || "",
     objectives: call.objectives || [],
@@ -771,6 +869,7 @@ export function normalizeCallRecord(call, { source = null, previousCall = null, 
       status: { value: normalizedStatus, rawText: rawText.slice(0, 280), sourceUrl: call.url, confidence: pageType.confidence },
       officialUrl: { value: officialUrl || "", rawText: officialUrl || "", sourceUrl: call.url, confidence: officialUrl ? 0.95 : 0 },
       applicationUrl: { value: applicationUrl || "", rawText: applicationUrl || "", sourceUrl: call.url, confidence: applicationUrl ? 0.92 : 0 },
+      ...fundingDetails.evidence,
     },
   };
   enhanced.confidenceScore = call.confidenceScore ?? scoreConfidence(enhanced, resolvedSource, enhanced.institutionMatch);
@@ -881,6 +980,33 @@ export class AutomationQueue {
     return normalized;
   }
 
+  restore(snapshot = {}) {
+    const source = Array.isArray(snapshot)
+      ? { processed: snapshot }
+      : snapshot || {};
+    const pending = [
+      ...(source.pendingJobs || []),
+      ...(source.runningJobs || []).map((job) => ({ ...job, status: "pending", availableAt: new Date().toISOString() })),
+    ];
+    const deadLetters = source.deadLetters || [];
+    const processed = source.processed || (Array.isArray(snapshot) ? snapshot : []);
+    this.pending = [];
+    this.running = new Map();
+    this.deadLetters = [];
+    this.processed = [];
+    this.activeKeys = new Set();
+    for (const job of pending) this.enqueue({ ...job, status: "pending" });
+    for (const job of deadLetters.slice(-50)) {
+      const deadLetter = { ...job, status: "dead_letter" };
+      this.deadLetters.push(deadLetter);
+      this.processed.push(deadLetter);
+    }
+    for (const job of processed.slice(-100)) {
+      if (job?.status !== "dead_letter") this.processed.push(job);
+    }
+    return this.snapshot();
+  }
+
   nextBackoffMs(job) {
     const retry = Math.max(0, job.retryCount || 0);
     const jitter = Math.floor(Math.random() * this.baseDelayMs);
@@ -929,6 +1055,17 @@ export class AutomationQueue {
     return completed;
   }
 
+  completeByIdempotencyKey(idempotencyKey, result = {}) {
+    const pendingIndex = this.pending.findIndex((job) => job.idempotencyKey === idempotencyKey);
+    if (pendingIndex !== -1) {
+      const [job] = this.pending.splice(pendingIndex, 1);
+      return this.complete({ ...job, status: "running", startedAt: new Date().toISOString() }, result);
+    }
+    const running = [...this.running.values()].find((job) => job.idempotencyKey === idempotencyKey);
+    if (running) return this.complete(running, result);
+    return null;
+  }
+
   takeReady() {
     if (this.running.size >= this.concurrency) return null;
     const now = Date.now();
@@ -949,6 +1086,18 @@ export class AutomationQueue {
       deadLetters: this.deadLetters.slice(-20),
       processed: this.processed.slice(-50),
       jobTypes: Object.values(JOB_TYPES),
+    };
+  }
+
+  persistableSnapshot() {
+    const snapshot = this.snapshot();
+    return {
+      ...snapshot,
+      pendingJobs: snapshot.pendingJobs,
+      runningJobs: snapshot.runningJobs,
+      deadLetters: snapshot.deadLetters,
+      processed: snapshot.processed,
+      savedAt: new Date().toISOString(),
     };
   }
 }
@@ -989,7 +1138,7 @@ export function createSourceAdapters(scraperMap = {}) {
       for (const url of urls) {
         const page = await scraper.fetchListPage(url);
         const listItems = await scraper.extractListItems(page);
-        if (process.env.ENABLE_DEEP_SCRAPING === "true" && scraper.fetchDetailPage && scraper.extractDetailData) {
+        if (process.env.ENABLE_DEEP_SCRAPING !== "false" && scraper.fetchDetailPage && scraper.extractDetailData) {
           for (const item of listItems) {
             try {
               const detailPage = await scraper.fetchDetailPage(item);
@@ -1016,26 +1165,38 @@ export function createSourceAdapters(scraperMap = {}) {
 
 export async function loadAutomationState(statePath) {
   try {
-    const raw = await fs.readFile(statePath, "utf8");
-    return { version: STATE_VERSION, ...JSON.parse(raw) };
+    const dbState = loadStateFromDb();
+    if (!dbState || !dbState.version) {
+      // Fallback to initial if db empty
+      throw new Error("Empty DB");
+    }
+    return dbState;
   } catch {
-    return {
-      version: STATE_VERSION,
-      calls: {},
-      sources: Object.fromEntries(SOURCE_REGISTRY.map((source) => [source.id, { ...source, consecutiveFailures: 0, healthStatus: "healthy" }])),
-      sourceCrawlLogs: [],
-      callChangeLogs: [],
-      manualReviewQueue: [],
-      crawlerJobs: [],
-      linkHealthChecks: [],
-      metrics: {},
-    };
+    // Try to load from legacy JSON file if DB fails/is empty
+    try {
+      const raw = await fs.readFile(statePath, "utf8");
+      const legacyState = { version: STATE_VERSION, ...JSON.parse(raw) };
+      // Migrate to DB automatically
+      saveStateToDb(legacyState);
+      return legacyState;
+    } catch {
+      return {
+        version: STATE_VERSION,
+        calls: {},
+        sources: Object.fromEntries(SOURCE_REGISTRY.map((source) => [source.id, { ...source, consecutiveFailures: 0, healthStatus: "healthy" }])),
+        sourceCrawlLogs: [],
+        callChangeLogs: [],
+        manualReviewQueue: [],
+        crawlerJobs: [],
+        linkHealthChecks: [],
+        metrics: {},
+      };
+    }
   }
 }
 
 export async function saveAutomationState(statePath, state) {
-  await fs.mkdir(path.dirname(statePath), { recursive: true });
-  await fs.writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`);
+  saveStateToDb(state);
 }
 
 export function updateSourceHealth(state, source, { ok, durationMs = 0, status = null, error = null, found = 0 } = {}) {
@@ -1090,22 +1251,32 @@ export function buildManualReviewItems(calls, duplicates = [], linkHealthChecks 
   return items;
 }
 
-export async function verifyLinks(calls, { timeoutMs = 5000 } = {}) {
-  const checks = [];
-  const candidates = calls
+export function buildLinkCheckCandidates(calls, { limit = Number(process.env.LINK_VERIFY_LIMIT || 25) } = {}) {
+  return calls
     .flatMap((call) => [
       { callId: call.id, type: "official", url: call.officialUrl || call.url },
       { callId: call.id, type: "application", url: call.applicationUrl },
       { callId: call.id, type: "guide", url: call.guideUrl },
       ...(call.attachments || []).map((attachment) => ({ callId: call.id, type: "attachment", url: attachment.url || attachment })),
     ])
-    .filter((item) => item.url && isSafeCrawlerUrl(item.url));
-  for (const candidate of candidates.slice(0, Number(process.env.LINK_VERIFY_LIMIT || 25))) {
+    .filter((item) => item.url && isSafeCrawlerUrl(item.url))
+    .filter((item, index, list) => index === list.findIndex((candidate) => candidate.callId === item.callId && candidate.type === item.type && candidate.url === item.url))
+    .slice(0, limit);
+}
+
+export async function verifyLinks(calls, { timeoutMs = 5000, candidates = null } = {}) {
+  const checks = [];
+  const linkCandidates = candidates || buildLinkCheckCandidates(calls);
+  for (const candidate of linkCandidates) {
     const started = Date.now();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch(candidate.url, { method: "HEAD", redirect: "follow", signal: controller.signal }).finally(() => clearTimeout(timer));
+      let response = await fetch(candidate.url, { method: "HEAD", redirect: "follow", signal: controller.signal });
+      if ([405, 501].includes(response.status)) {
+        response = await fetch(candidate.url, { method: "GET", redirect: "follow", signal: controller.signal });
+      }
+      clearTimeout(timer);
       const redirected = response.url && response.url !== candidate.url;
       checks.push({
         ...candidate,
@@ -1147,8 +1318,13 @@ export function buildAutomationMetrics(state, calls) {
 
 export function mergeManualReviewQueue(existing = [], incoming = []) {
   const byId = new Map(existing.map((item) => [item.id, item]));
+  const incomingIds = new Set(incoming.map((item) => item.id));
+  for (const [id, item] of byId) {
+    if (item.status === "pending" && !incomingIds.has(id)) byId.delete(id);
+  }
   for (const item of incoming) {
-    if (!byId.has(item.id)) byId.set(item.id, item);
+    const previous = byId.get(item.id);
+    byId.set(item.id, previous ? { ...item, ...previous, reasons: item.reasons, title: item.title } : item);
   }
   return [...byId.values()].slice(-500);
 }

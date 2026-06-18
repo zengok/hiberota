@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: proje-yakalama
+    name: hiberota
     env: node
     plan: starter
     buildCommand: npm ci && npm run build
@@ -21,3 +21,11 @@ services:
         value: 25
       - key: CONFIDENCE_AUTO_PUBLISH_MIN
         value: 75
+      - key: ADMIN_API_TOKEN
+        sync: false
+      - key: MAX_JSON_BODY
+        value: 32kb
+      - key: MAX_URL_LENGTH
+        value: 2048
+      - key: MAX_SSE_CLIENTS
+        value: 100

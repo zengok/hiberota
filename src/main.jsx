@@ -1,9 +1,10 @@
-import React, { useDeferredValue, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   AlertCircle,
   ArrowRight,
   ArrowUpRight,
+  BadgeCheck,
   Banknote,
   BookOpen,
   Building2,
@@ -24,6 +25,7 @@ import {
   Leaf,
   ListFilter,
   Mail,
+  MapPin,
   MessageCircle,
   Menu,
   RefreshCw,
@@ -32,16 +34,33 @@ import {
   Share2,
   ShieldCheck,
   Sparkles,
+  SlidersHorizontal,
   Target,
   Timer,
   Users,
   WalletCards,
   X,
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import catalogData from "./data/catalog.json";
 import { FavoriteButton } from "./components/FavoriteButton.jsx";
+import { useFavorites } from "./hooks/useFavorites.js";
 import { CallCardSkeleton } from "./components/SkeletonLoading.jsx";
+import { AdBanner } from "./components/AdBanner.jsx";
 import "./styles.css";
+
+export function cleanHtml(text = "") {
+  return String(text).replace(/<[a-z/][^>]*>/gi, " ").replace(/\s+/g, " ").trim();
+}
+
+export function ensureHttp(url) {
+  if (!url || typeof url !== "string") return "";
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  if (url.startsWith("/")) return url;
+  return `https://${url}`;
+}
 
 const filterTabs = [
   { label: "Türkiye", value: "Ulusal", query: "national", dot: "tr" },
@@ -195,7 +214,11 @@ const searchSynonyms = {
 
 function formatDate(value) {
   if (!value) return "Tarih bekleniyor";
-  return new Intl.DateTimeFormat("tr-TR", { day: "2-digit", month: "long", year: "numeric" }).format(new Date(value));
+  try {
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return "Tarih bekleniyor";
+    return new Intl.DateTimeFormat("tr-TR", { day: "2-digit", month: "long", year: "numeric" }).format(d);
+  } catch { return "Tarih bekleniyor"; }
 }
 
 function normalizeSearch(value = "") {
@@ -281,13 +304,17 @@ function matchesSearch(call, groups) {
 
 function formatDateTime(value) {
   if (!value) return "Henüz çekim yok";
-  return new Intl.DateTimeFormat("tr-TR", {
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
+  try {
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return "Henüz çekim yok";
+    return new Intl.DateTimeFormat("tr-TR", {
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(d);
+  } catch { return "Henüz çekim yok"; }
 }
 
 function formatRelativeTime(value) {
@@ -396,9 +423,10 @@ function calendarLinks(call) {
   const start = call.deadline ? new Date(call.deadline) : new Date();
   const ymd = start.toISOString().slice(0, 10).replace(/-/g, "");
   const text = encodeURIComponent(call.title);
-  const cleanSummary = String(call.summary || call.category).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-  const details = encodeURIComponent(`${cleanSummary}\n${call.url}`);
-  const url = encodeURIComponent(call.url);
+  const cleanSummary = String(call.summary || call.category || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const callUrl = call.url || "";
+  const details = encodeURIComponent(`${cleanSummary}\n${callUrl}`);
+  const url = encodeURIComponent(callUrl);
   return {
     google: `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${text}&dates=${ymd}/${ymd}&details=${details}&location=${url}`,
     outlook: `https://outlook.live.com/calendar/0/deeplink/compose?subject=${text}&startdt=${start.toISOString()}&body=${details}`,
@@ -406,14 +434,23 @@ function calendarLinks(call) {
   };
 }
 
+function currencyLabel(value = "") {
+  return { TRY: "TL", TL: "TL", EUR: "EUR", USD: "USD" }[String(value).toLocaleUpperCase("tr-TR")] || value;
+}
+
 function formatBudget(call) {
-  if (call.budgetMax) return `${Number(call.budgetMax).toLocaleString("tr-TR")} ${call.currency || ""}`.trim();
+  if (call.budgetMax) {
+    const currency = currencyLabel(call.currency);
+    const max = `${Number(call.budgetMax).toLocaleString("tr-TR")} ${currency}`.trim();
+    if (call.budgetMin) return `${Number(call.budgetMin).toLocaleString("tr-TR")} - ${max}`;
+    return max;
+  }
   if (call.support && !/belirtilir|doküman|detay|değişir/i.test(call.support)) return call.support;
   return "Resmî çağrı metninde belirtilir";
 }
 
 function formatSupportRate(call) {
-  if (call.supportRate) return `%${call.supportRate}`;
+  if (call.supportRate) return `%${Number(call.supportRate).toLocaleString("tr-TR")}`;
   if (/genel gider|overhead/i.test(call.support || "")) return call.support;
   return "Çağrı koşullarına göre";
 }
@@ -487,16 +524,22 @@ function navigate(path) {
 function useCalls() {
   const [state, setState] = useState({ calls: [], errors: [], fetchedAt: null, loading: true });
 
-  async function refresh({ force = false } = {}) {
+  const refresh = useCallback(async ({ force = false } = {}) => {
     setState((current) => ({ ...current, loading: true }));
     try {
-      const response = await fetch(force ? "/api/calls/refresh" : "/api/calls", { method: force ? "POST" : "GET" });
+      const apiKey = force ? window.prompt('Admin API Key:') : null;
+      if (force && !apiKey) {
+        setState((current) => ({ ...current, loading: false }));
+        return;
+      }
+      const url = force ? `/api/calls/refresh?api_key=${apiKey}` : "/api/calls";
+      const response = await fetch(url, { method: force ? "POST" : "GET" });
       const payload = await response.json();
       setState({ ...payload, loading: false });
     } catch (error) {
       setState({ calls: [], errors: [{ source: "Uygulama", message: error.message }], fetchedAt: null, loading: false });
     }
-  }
+  }, []);
 
   useEffect(() => {
     refresh();
@@ -509,7 +552,7 @@ function useCalls() {
       clearTimeout(hourlyTimer);
       if (intervalTimer) clearInterval(intervalTimer);
     };
-  }, []);
+  }, [refresh]);
 
   return { ...state, refresh };
 }
@@ -591,7 +634,7 @@ function Header({ route }) {
         event.preventDefault();
         navigate("/");
       }} aria-label="Hibe Rota ana sayfa">
-        <span className="brandMark" aria-hidden="true"><Sparkles size={18} /></span>
+        <img className="brandLogo" src="/logo.svg" alt="" aria-hidden="true" />
         <strong>Hibe Rota</strong>
       </a>
       <nav>
@@ -708,6 +751,10 @@ function CompactCall({ call, variant }) {
       : variant === "detected"
         ? formatRelativeTime(call.firstDetectedAt || call.lastDetectedAt)
         : urgencyLabel(call);
+
+  const daysLeftNum = daysLeft(call.deadline);
+  const isUrgent = daysLeftNum !== null && daysLeftNum <= 10 && (variant === "urgent" || !variant || variant === "favorite");
+
   return (
     <a className="compactCall" href={callPath(call)} onClick={(event) => {
       event.preventDefault();
@@ -715,10 +762,10 @@ function CompactCall({ call, variant }) {
     }}>
       <span className={`compactDot ${variant || call.scope}`}></span>
       <div>
-        <strong>{call.title}</strong>
-        <span>{call.funder}</span>
+        <strong>{cleanHtml(call.title)}</strong>
+        <span>{cleanHtml(call.funder)}</span>
       </div>
-      <em>{metaLabel}</em>
+      <em className={isUrgent ? "urgentText" : ""}>{metaLabel}</em>
     </a>
   );
 }
@@ -727,13 +774,26 @@ function CallCard({ call, selected, onSelect, mode = "expand" }) {
   const progress = deadlineProgress(call);
   const links = calendarLinks(call);
   const asDetail = mode === "link";
+  const closed = isClosedCall(call);
+  const statusTone = closed ? "closed" : callStatusGroup(call) === "upcoming" ? "upcoming" : "open";
   const openDetail = (event) => {
     event.stopPropagation();
     navigate(callPath(call));
   };
 
   return (
-    <article className={`callCard ${selected ? "selected" : ""} scopeCard-${call.scope}`} onClick={asDetail ? undefined : onSelect}>
+    <article 
+      className={`callCard ${selected ? "selected" : ""} scopeCard-${call.scope}`} 
+    >
+      <a href={callPath(call)} className="cardLinkOverlay" aria-label={`${cleanHtml(call.title)} detayları`} onClick={(e) => {
+        if (e.button === 1 || e.metaKey || e.ctrlKey) return; // Allow middle-click and ctrl-click native behavior
+        e.preventDefault();
+        if (asDetail) {
+          openDetail(e);
+        } else if (onSelect) {
+          onSelect(e);
+        }
+      }}></a>
       <div className="progressLine" style={{ width: `${progress}%` }}></div>
       {!asDetail && (
         <button
@@ -742,26 +802,30 @@ function CallCard({ call, selected, onSelect, mode = "expand" }) {
           aria-label="Detayı kapat"
           onClick={(event) => {
             event.stopPropagation();
-            onSelect(true);
+            if (onSelect) onSelect(true);
           }}
         >
           <X size={16} />
         </button>
       )}
       <div className="cardTop">
-        <span className="statusChip">{statusLabel(call.normalizedStatus || call.status)}</span>
+        <span className="cardType"><BadgeCheck size={17} /> CallCard</span>
+        <span className={`statusChip ${statusTone}`}>{statusLabel(call.normalizedStatus || call.status)}</span>
         <span className={`scopeChip scope-${call.scope}`}>{scopeLabel(call.scope)}</span>
-        <span className="sourceTrust"><ShieldCheck size={15} />{sourceBadge(call)}</span>
         <FavoriteButton callId={call.id} className="cardFavorite" label="Favori" />
       </div>
-      <h3>{call.title}</h3>
-      <p>{call.summary || call.category}</p>
-      <div className="cardFacts">
-        <DetailItem label="Kurum" value={call.funder} />
-        <DetailItem label="Destek" value={call.support} />
-        <DetailItem label="Son Başvuru" value={formatDate(call.deadline)} />
+      <h3>{cleanHtml(call.title)}</h3>
+      <p>{cleanHtml(call.summary || call.category)}</p>
+      <div className="cardMetaLine">
+        <span>{call.funder}</span>
+        <span><ShieldCheck size={14} /> {sourceBadge(call)}</span>
       </div>
-      {(selected || asDetail) && (
+      <div className="cardFacts">
+        <DetailItem label="Destek Tutarı" value={formatBudget(call)} />
+        <DetailItem label="Son Başvuru" value={formatDate(call.deadline)} />
+        <DetailItem label="Kalan" value={urgencyLabel(call)} />
+      </div>
+      {selected && (
         <div className="cardDetails">
           <div className="detailGrid">
             <DetailItem label="Kategori" value={call.category} />
@@ -773,7 +837,7 @@ function CallCard({ call, selected, onSelect, mode = "expand" }) {
           </div>
           <div className="detailActions" onClick={(event) => event.stopPropagation()}>
             <button type="button" className="primaryAction buttonLink" onClick={openDetail}>Detayları İncele <ArrowRight size={15} /></button>
-            <a href={call.url} target="_blank" rel="noopener noreferrer">Resmi Başvuru <ArrowUpRight size={15} /></a>
+            {call.url && <a href={ensureHttp(call.url)} target="_blank" rel="noopener noreferrer">Resmi Başvuru <ArrowUpRight size={15} /></a>}
             <a href={links.ics}>ICS indir</a>
           </div>
         </div>
@@ -796,16 +860,17 @@ function FilterPanel({ calls, filters, setFilters, categories, funders, refresh,
   return (
     <aside className="filterPanel" aria-label="Çağrı filtreleri">
       <div className="filterHeader">
-        <h2><ListFilter size={21} /> Filtreler</h2>
+        <h2>Filtreler</h2>
         <button type="button" onClick={() => setFilters((current) => ({ ...current, query: "", scope: lockedScope || "Tümü", status: "open", category: "", funder: "", deadlineWithin: "", sort: "deadline_asc" }))}>Temizle</button>
       </div>
       <label className="fieldLabel">
         <span>Arama</span>
         <span className="inlineSearch">
           <Search size={20} />
-          <input value={filters.query} onChange={(event) => update("query", event.target.value)} placeholder="Çağrı adı, kurum veya anahtar kelime" />
+          <input value={filters.query} onChange={(event) => update("query", event.target.value)} placeholder="Anahtar kelime ile ara" />
         </span>
       </label>
+      <span className="filterGroupTitle">Kapsam</span>
       <div className="segmentGroup" aria-label="Çağrı türü filtresi">
         {filterTabs.map((tab) => (
           <button key={tab.value} type="button" disabled={Boolean(lockedScope) && lockedScope !== tab.value} className={filters.scope === tab.value ? "active" : ""} onClick={() => update("scope", tab.value)}>
@@ -857,7 +922,7 @@ function FilterPanel({ calls, filters, setFilters, categories, funders, refresh,
         </label>
       </div>
       <div className="syncBox">
-        <button className="refresh" onClick={() => refresh({ force: true })} disabled={loading} title="Kaynakları yenile">
+        <button className="refresh" onClick={() => refresh()} disabled={loading} title="Verileri güncelle">
           <RefreshCw size={18} className={loading ? "spin" : ""} />
           Yenile
         </button>
@@ -876,9 +941,78 @@ function LoadingState() {
   return <div className="emptyState"><RefreshCw className="spin" size={24} /><strong>Çağrılar yükleniyor</strong><p>Canlı kaynaklar taranıyor.</p></div>;
 }
 
+function CallsAside({ calls, errors }) {
+  const featured = calls[0];
+  const upcoming = calls.slice(1, 4);
+
+  return (
+    <aside className="callsAside" aria-label="Çağrı özeti">
+      <div className="promoPanel">
+        <span className="promoMark"><img src="/logo.png" alt="" aria-hidden="true" /></span>
+        <h2>Doğru hibeyi daha hızlı yakalayın.</h2>
+        <p>Canlı kaynaklar taranır, açık çağrılar tek listede toplanır ve kritik son tarihler öne çıkarılır.</p>
+        <a href="/rehber" onClick={(event) => {
+          event.preventDefault();
+          navigate("/rehber");
+        }}>Rehberi Aç</a>
+      </div>
+
+      <AdBanner type="custom" size="sidebar" />
+
+      {featured && (
+        <div className="asidePanel">
+          <span>Öne Çıkan</span>
+          <strong>{featured.title}</strong>
+          <p>{featured.funder} · {formatDate(featured.deadline)}</p>
+        </div>
+      )}
+      <div className="asidePanel compact">
+        <span>{errors.length ? "Kaynak Uyarıları" : "Kaynak Durumu"}</span>
+        <strong>{errors.length ? `${errors.length} uyarı var` : "Kaynaklar aktif"}</strong>
+        <p>Sonuçlar canlı katalog ve doğrulama akışından gelir.</p>
+      </div>
+      {!!upcoming.length && (
+        <div className="asidePanel miniList">
+          <span>Yaklaşanlar</span>
+          {upcoming.map((call) => (
+            <a key={call.id} href={callPath(call)} onClick={(event) => {
+              event.preventDefault();
+              navigate(callPath(call));
+            }}>
+              <strong>{cleanHtml(call.title)}</strong>
+              <em>{urgencyLabel(call)}</em>
+            </a>
+          ))}
+        </div>
+      )}
+    </aside>
+  );
+}
+
 function HomePage({ model, filters, setFilters }) {
   usePageMeta("Hibe Rota | Ana Sayfa", "Ulusal ve uluslararası hibe, fon ve proje destek çağrılarını canlı kaynaklardan izleyin.");
   const { openCalls, urgent, newlyOpened, recentlyDetected, funders, categories, urgentWeek } = model;
+  
+  const { favoriteIds } = useFavorites();
+  const favoriteCalls = useMemo(() => {
+    if (!favoriteIds || !favoriteIds.length) return [];
+    const set = new Set(favoriteIds);
+    return model.calls.filter((c) => set.has(c.id));
+  }, [favoriteIds, model.calls]);
+
+  const [activeTab, setActiveTab] = useState("urgent");
+  const [heroScope, setHeroScope] = useState("all");
+
+  const tabData = {
+    urgent: { label: "Yaklaşanlar", data: urgent.slice(0, 5), fallback: "Yaklaşan son tarih bulunamadı.", link: "/cagrilar/yaklasan" },
+    new: { label: "Yeni Açılanlar", data: newlyOpened.slice(0, 5), fallback: "Yeni çağrı bulunamadı.", link: "/cagrilar?sort=newest" },
+    detected: { label: "Son Tespitler", data: recentlyDetected.slice(0, 5), fallback: "Son taramalarda çağrı yakalanmadı.", link: "/cagrilar?sort=newest&status=open" }
+  };
+
+  const nationalCalls = useMemo(() => {
+    return openCalls.filter(call => call.scope === "Ulusal").slice(0, 5);
+  }, [openCalls]);
+
   return (
     <>
       <section className="hero content">
@@ -888,22 +1022,54 @@ function HomePage({ model, filters, setFilters }) {
         </div>
         <form className="heroSearch" onSubmit={(event) => {
           event.preventDefault();
-          navigate(`/cagrilar?scope=all&q=${encodeURIComponent(filters.query)}`);
+          navigate(`/cagrilar?scope=${heroScope}&q=${encodeURIComponent(filters.query)}`);
         }}>
-          <Search size={24} />
-          <input value={filters.query} onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))} placeholder="Program, kurum, proje alanı veya çağrı adı ara" aria-label="Çağrı arama" />
+          <select value={heroScope} onChange={(e) => setHeroScope(e.target.value)} className="heroScopeSelect" aria-label="Kapsam">
+            <option value="all">Tüm Kapsamlar</option>
+            <option value="national">Sadece Türkiye</option>
+            <option value="europe">Sadece Avrupa</option>
+            <option value="international">Sadece Uluslararası</option>
+          </select>
+          <div className="searchInputWrapper">
+            <Search size={20} />
+            <input value={filters.query} onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))} placeholder="Program, kurum, proje alanı veya çağrı adı ara" aria-label="Çağrı arama" />
+          </div>
           <button type="submit">Ara</button>
         </form>
         <div className="popularTags">
-          <span>Popüler Aramalar:</span>
-          {["TÜBİTAK 1001", "Yapay Zekâ", "Horizon Europe", "KOSGEB AR-GE"].map((tag) => (
-            <button key={tag} type="button" onClick={() => {
-              setFilters((current) => ({ ...current, query: tag, scope: "Tümü" }));
-              navigate(`/cagrilar?q=${encodeURIComponent(tag)}&scope=all`);
-            }}>{tag}</button>
-          ))}
+          <div className="sectorChips">
+            {["🌱 Tarım", "💻 Bilişim", "⚡ Enerji", "🏥 Sağlık", "🏭 İmalat", "🎓 Akademi"].map((tag) => (
+              <button key={tag} type="button" className="chipButton" onClick={() => {
+                const q = tag.replace(/[\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, '').trim();
+                setFilters((current) => ({ ...current, query: q, scope: "Tümü" }));
+                navigate(`/cagrilar?q=${encodeURIComponent(q)}&scope=all`);
+              }}>{tag}</button>
+            ))}
+          </div>
+        </div>
+        <div className="statsInline">
+          <span><strong>{catalogData.catalog.length}+</strong> Destek Programı</span>
+          <span><strong>{openCalls.length}</strong> Açık Çağrı</span>
+          <span><strong>{funders.length}</strong> Aktif Kaynak</span>
         </div>
       </section>
+
+      <div className="content">
+        <AdBanner type="custom" size="leaderboard" />
+      </div>
+
+      {favoriteCalls.length > 0 && (
+        <section className="content dashboardIntro">
+          <div className="dashboardPanel fullWidth">
+            <div className="panelTitle">
+              <h2><Heart size={23} fill="currentColor" className="text-red" /> Kayıtlı Çağrılarınız</h2>
+            </div>
+            <div className="compactList horizontalList">
+              {favoriteCalls.slice(0, 4).map((call) => <CompactCall key={call.id} call={call} variant="favorite" />)}
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="audienceBand">
         <div className="content">
@@ -919,48 +1085,35 @@ function HomePage({ model, filters, setFilters }) {
         </div>
       </section>
 
-      <section className="statsStrip">
-        <div className="content statsGrid">
-          <div><strong>{catalogData.catalog.length}+</strong><span>Destek Programı</span></div>
-          <div><strong>{openCalls.length}</strong><span>Açık Çağrı</span></div>
-          <div><strong>{funders.length}</strong><span>Aktif Kaynak</span></div>
-          <div><strong>{urgentWeek}</strong><span>7 Gün İçinde Kapanan</span></div>
-        </div>
-      </section>
-
       <section className="content dashboardIntro">
-        <div className="dashboardPanel">
-          <div className="panelTitle">
-            <h2><Timer size={23} /> Başvuru Tarihi Yaklaşanlar</h2>
-            <a href="/cagrilar/yaklasan" onClick={(event) => { event.preventDefault(); navigate("/cagrilar/yaklasan"); }}>Tümünü Gör</a>
+        <div className="dashboardPanel tabbedPanel">
+          <div className="panelTabs">
+            {Object.entries(tabData).map(([key, { label }]) => (
+              <button key={key} className={`tabButton ${activeTab === key ? 'active' : ''}`} onClick={() => setActiveTab(key)}>
+                {label}
+              </button>
+            ))}
           </div>
-          <div className="compactList">
-            {urgent.slice(0, 5).map((call) => <CompactCall key={call.id} call={call} />)}
-            {!urgent.length && <p className="emptyInline">Yaklaşan son tarih bulunamadı.</p>}
-          </div>
-        </div>
-        <div className="dashboardPanel">
-          <div className="panelTitle">
-            <h2><Sparkles size={23} /> Yeni Açılanlar</h2>
-            <a href="/cagrilar?sort=newest" onClick={(event) => { event.preventDefault(); navigate("/cagrilar?sort=newest"); }}>Tümünü Gör</a>
-          </div>
-          <div className="compactList">
-            {newlyOpened.slice(0, 5).map((call) => <CompactCall key={call.id} call={call} variant="new" />)}
-            {!newlyOpened.length && <p className="emptyInline">Yeni çağrı bulunamadı.</p>}
+          <div className="tabContent">
+             <div className="compactList">
+               {tabData[activeTab].data.map((call) => <CompactCall key={call.id} call={call} variant={activeTab} />)}
+               {!tabData[activeTab].data.length && <p className="emptyInline">{tabData[activeTab].fallback}</p>}
+             </div>
+             <a href={tabData[activeTab].link} className="ctaButton" onClick={(event) => { event.preventDefault(); navigate(tabData[activeTab].link); }}>Tüm {tabData[activeTab].label} Listesini Gör <ArrowRight size={16} /></a>
           </div>
         </div>
-      </section>
-
-      <section className="content dashboardIntro">
-        <div className="dashboardPanel">
-          <div className="panelTitle">
-            <h2><RefreshCw size={23} /> Otomasyonun Yeni Yakaladıkları</h2>
-            <a href="/cagrilar?sort=newest&status=open" onClick={(event) => { event.preventDefault(); navigate("/cagrilar?sort=newest&status=open"); }}>Tümünü Gör</a>
+        
+        <div className="dashboardPanel listPanel">
+          <div className="panelHeader" style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-soft)', backgroundColor: 'var(--surface-sunken)' }}>
+            <h2 style={{ fontSize: '18px', margin: 0, fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}><MapPin size={20} className="text-red" /> Türkiye'de Aktif Projeler</h2>
+            <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--text-soft)' }}>Türkiye'de açılan güncel destek ve fon başvuruları</p>
           </div>
-          <p className="panelNote">Her saat başı yapılan taramada yeni tespit edilen ve bağlantısı doğrulanmış açık destek başvuruları burada listelenir.</p>
-          <div className="compactList">
-            {recentlyDetected.slice(0, 6).map((call) => <CompactCall key={call.id} call={call} variant="detected" />)}
-            {!recentlyDetected.length && <p className="emptyInline">Son saatlik taramalarda yeni doğrulanmış çağrı yakalanmadı.</p>}
+          <div className="tabContent">
+             <div className="compactList">
+               {nationalCalls.map((call) => <CompactCall key={call.id} call={call} variant="new" />)}
+               {!nationalCalls.length && <p className="emptyInline">Türkiye'de aktif çağrı bulunamadı.</p>}
+             </div>
+             <a href="/cagrilar/ulusal" className="ctaButton" onClick={(event) => { event.preventDefault(); navigate("/cagrilar/ulusal"); }}>Tüm Türkiye Listesini Gör <ArrowRight size={16} /></a>
           </div>
         </div>
       </section>
@@ -1012,7 +1165,26 @@ function CallsPage({ route, model, filters, setFilters, refresh, loading, fetche
   return (
     <>
       <Breadcrumb items={[{ label: pageTitle }]} />
-      <PageHero eyebrow="Çağrılar" title={pageTitle} text={pageText} />
+      <section className="callsHero content">
+        <div>
+          <span>Çağrılar</span>
+          <h1>{pageTitle}</h1>
+          <p>{filtered.length} sonuç</p>
+        </div>
+        <div className="callsHeroActions">
+          <a href={`/api/v1/exports/calls.csv?${exportQuery}`}><FileDown size={16} /> CSV</a>
+          <a href={`/api/v1/exports/calls.xlsx?${exportQuery}`}><FileDown size={16} /> Excel</a>
+          <a href={`/api/v1/exports/calls.pdf?${exportQuery}`}><FileDown size={16} /> PDF</a>
+          <label className="sortControl">
+            <SlidersHorizontal size={16} />
+            <select value={pageFilters.sort} onChange={(event) => setFilters((current) => ({ ...current, sort: event.target.value }))}>
+              <option value="deadline_asc">Sıralama: Yakın</option>
+              <option value="deadline_desc">Sıralama: Uzak</option>
+              <option value="newest">Sıralama: Yeni</option>
+            </select>
+          </label>
+        </div>
+      </section>
       <section className="content callsSection">
         <button className="mobileFilterTrigger" type="button" onClick={() => setFiltersOpen(true)}>
           <ListFilter size={18} />
@@ -1027,17 +1199,9 @@ function CallsPage({ route, model, filters, setFilters, refresh, loading, fetche
           <div className="sectionHeader">
             <div>
               <h2>{pageTitle}</h2>
-              <p>{filtered.length} çağrı listeleniyor. Varsayılan sıralama son başvuru tarihine göredir.</p>
+              <p>{pageText}</p>
             </div>
             <div className="health">{errors.length ? <AlertCircle size={17} /> : <CheckCircle2 size={17} />}{errors.length ? `${errors.length} kaynak uyarısı` : "Kaynaklar aktif"}</div>
-          </div>
-          <div className="resultsControls">
-            <strong>{filtered.length} çağrı bulundu</strong>
-            <div className="toolbarActions">
-              <a href={`/api/v1/exports/calls.csv?${exportQuery}`}><FileDown size={15} /> CSV</a>
-              <a href={`/api/v1/exports/calls.xlsx?${exportQuery}`}><FileDown size={15} /> Excel</a>
-              <a href={`/api/v1/exports/calls.pdf?${exportQuery}`}><FileDown size={15} /> PDF</a>
-            </div>
           </div>
           {loading && !model.calls.length ? <CallCardSkeleton /> : (
             <div className="cardGrid">
@@ -1046,6 +1210,7 @@ function CallsPage({ route, model, filters, setFilters, refresh, loading, fetche
             </div>
           )}
         </div>
+        <CallsAside calls={filtered} errors={errors} />
       </section>
     </>
   );
@@ -1093,18 +1258,22 @@ function CallDetailPage({ route, model }) {
   const shareUrl = `${window.location.origin}${callPath(call)}`;
   const shareText = `${call.title} - Hibe Rota`;
   const share = async () => {
-    if (navigator.share) {
-      await navigator.share({ title: call.title, text: shareText, url: shareUrl });
-      return;
-    }
-    await navigator.clipboard.writeText(shareUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1800);
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: call.title, text: shareText, url: shareUrl });
+        return;
+      }
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch { /* user cancelled or clipboard unavailable */ }
   };
   const copyLink = async () => {
-    await navigator.clipboard.writeText(shareUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1800);
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch { /* clipboard unavailable */ }
   };
   const criticalInfo = [
     ["Çağrı kodu", call.callCode || call.externalId],
@@ -1118,10 +1287,10 @@ function CallDetailPage({ route, model }) {
     ["Son başvuru saati", call.deadlineTime],
     ["Saat dilimi", call.deadlineTimezone],
     ["Proje süresi", call.projectDuration],
-    ["Toplam bütçe", call.budgetMax ? `${call.budgetMax.toLocaleString("tr-TR")} ${call.currency || ""}` : ""],
-    ["Destek oranı", call.supportRate ? `%${call.supportRate}` : ""],
+    ["Toplam bütçe", call.budgetMax ? formatBudget(call) : ""],
+    ["Destek oranı", call.supportRate ? formatSupportRate(call) : ""],
     ["Başvuru dili", call.language?.toLocaleUpperCase("tr-TR")],
-    ["Uygun ülkeler", call.eligibleCountries?.join(", ")],
+    ["Uygun ülkeler", Array.isArray(call.eligibleCountries) ? call.eligibleCountries.join(", ") : call.eligibleCountries],
   ].filter(([, value]) => value && value !== "Tarih bekleniyor");
   const quickInfo = [
     { label: "Toplam Bütçe", value: formatBudget(call), icon: Banknote },
@@ -1141,7 +1310,7 @@ function CallDetailPage({ route, model }) {
       <Breadcrumb items={[{ label: "Çağrılar", href: "/cagrilar" }, { label: scopeLabel(call.scope), href: `/cagrilar/${scopeToQuery(call.scope) === "international" ? "uluslararasi" : scopeToQuery(call.scope) === "europe" ? "avrupa" : "ulusal"}` }, { label: "Çağrı Detayı" }]} />
       <section className="content callDetailHero">
         <div className="callHeroMain">
-          <h1>{call.title}</h1>
+          <h1>{cleanHtml(call.title)}</h1>
           <p className="callCodeLine">Çağrı ID: {call.callCode || call.externalId || call.id}</p>
           <div className="callPills">
             <span><ClipboardList size={16} /><strong>Cluster:</strong> {call.programme || call.category}</span>
@@ -1155,8 +1324,8 @@ function CallDetailPage({ route, model }) {
           </div>
           <p className="heroSummary">{compactSummary(call)}</p>
           <div className="detailActions">
-            {call.officialUrl && <a href={call.officialUrl} target="_blank" rel="noopener noreferrer">Resmî Çağrı Metnini Görüntüle <ArrowUpRight size={15} /></a>}
-            {call.guideUrl && <a href={call.guideUrl} target="_blank" rel="noopener noreferrer">Başvuru Rehberini Görüntüle <ArrowUpRight size={15} /></a>}
+            {call.officialUrl && <a href={ensureHttp(call.officialUrl)} target="_blank" rel="noopener noreferrer">Resmî Çağrı Metnini Görüntüle <ArrowUpRight size={15} /></a>}
+            {call.guideUrl && <a href={ensureHttp(call.guideUrl)} target="_blank" rel="noopener noreferrer">Başvuru Rehberini Görüntüle <ArrowUpRight size={15} /></a>}
             <button type="button" onClick={share}><Share2 size={15} /> Paylaş</button>
           </div>
           {copied && <div className="copyToast" role="status">Bağlantı kopyalandı.</div>}
@@ -1177,7 +1346,7 @@ function CallDetailPage({ route, model }) {
               </div>
             ))}
           </div>
-          {!closed && (call.applicationUrl || call.url) && <a className="primaryAction quickApply" href={call.applicationUrl || call.url} target="_blank" rel="noopener noreferrer"><ArrowUpRight size={18} /> Başvuru Yap</a>}
+          {!closed && (call.applicationUrl || call.url) && <a className="primaryAction quickApply" href={ensureHttp(call.applicationUrl || call.url)} target="_blank" rel="noopener noreferrer"><ArrowUpRight size={18} /> Başvuru Yap</a>}
           {closed && <span className="closedNotice">Bu çağrının başvuru süresi sona ermiştir.</span>}
           <FavoriteButton callId={call.id} className="favoriteAction" />
         </aside>
@@ -1192,6 +1361,7 @@ function CallDetailPage({ route, model }) {
           <div className="detailActions sideActions">
             <button type="button" onClick={copyLink}><Copy size={15} /> Bağlantıyı Kopyala</button>
           </div>
+          <AdBanner type="custom" size="sidebar" />
         </aside>
         <div className="detailContent">
           <section className="detailBlock">
@@ -1200,8 +1370,11 @@ function CallDetailPage({ route, model }) {
           </section>
           <section className="detailBlock">
             <h2>Çağrının Amacı</h2>
-            <p className="leadText">{call.purpose || call.description || call.summary || "Bu çağrı, resmî kaynakta belirtilen kapsamda proje, araştırma veya iş birliği faaliyetlerini desteklemeyi amaçlar."}</p>
+            <p className="leadText">{cleanHtml(call.purpose || call.description || call.summary || "Bu çağrı, resmî kaynakta belirtilen kapsamda proje, araştırma veya iş birliği faaliyetlerini desteklemeyi amaçlar.")}</p>
           </section>
+          <div className="content" style={{ padding: 0 }}>
+            <AdBanner type="custom" size="leaderboard" />
+          </div>
           {!!callBenefits(call).length && <section className="detailBlock">
             <h2>Program Ne Sağlıyor?</h2>
             <div className="benefitGrid">
@@ -1224,7 +1397,7 @@ function CallDetailPage({ route, model }) {
             <h2>Destek Kapsamı ve Bütçe</h2>
             <div className="detailGrid">
               <DetailItem label="Destek miktarı" value={formatBudget(call)} />
-              <DetailItem label="Para birimi" value={call.currency} />
+              <DetailItem label="Para birimi" value={currencyLabel(call.currency)} />
               <DetailItem label="Destek oranı" value={formatSupportRate(call)} />
               <DetailItem label="Proje süresi" value={call.projectDuration} />
             </div>
@@ -1244,7 +1417,7 @@ function CallDetailPage({ route, model }) {
           <section className="detailBlock">
             <h2>Gerekli Belgeler</h2>
             <div className="documentList">
-              {requiredDocuments(call).map((doc) => <article key={doc.name}><FileText size={18} /><div><strong>{doc.name}</strong><span>{doc.required ? "Zorunlu" : "Çağrı koşullarına bağlı"}</span>{doc.description && <p>{doc.description}</p>}</div>{doc.templateUrl && <a href={doc.templateUrl} target="_blank" rel="noopener noreferrer">Şablon</a>}</article>)}
+              {requiredDocuments(call).map((doc) => <article key={doc.name}><FileText size={18} /><div><strong>{doc.name}</strong><span>{doc.required ? "Zorunlu" : "Çağrı koşullarına bağlı"}</span>{doc.description && <p>{doc.description}</p>}</div>{doc.templateUrl && <a href={ensureHttp(doc.templateUrl)} target="_blank" rel="noopener noreferrer">Şablon</a>}</article>)}
             </div>
           </section>
           <section className="detailBlock">
@@ -1263,8 +1436,8 @@ function CallDetailPage({ route, model }) {
           <section className="detailBlock">
             <h2>Resmî Belgeler ve Bağlantılar</h2>
             <div className="detailActions">
-              {call.officialUrl && <a className="primaryAction" href={call.officialUrl} target="_blank" rel="noopener noreferrer">Resmî Kaynak <ArrowUpRight size={15} /></a>}
-              {call.guideUrl && <a href={call.guideUrl} target="_blank" rel="noopener noreferrer">Başvuru Rehberi <ArrowUpRight size={15} /></a>}
+              {call.officialUrl && <a className="primaryAction" href={ensureHttp(call.officialUrl)} target="_blank" rel="noopener noreferrer">Resmî Kaynak <ArrowUpRight size={15} /></a>}
+              {call.guideUrl && <a href={ensureHttp(call.guideUrl)} target="_blank" rel="noopener noreferrer">Başvuru Rehberi <ArrowUpRight size={15} /></a>}
               <a href={links.google} target="_blank" rel="noopener noreferrer">Google Calendar</a>
               <a href={links.outlook} target="_blank" rel="noopener noreferrer">Outlook</a>
               <a href={links.ics}>ICS indir</a>
@@ -1274,7 +1447,7 @@ function CallDetailPage({ route, model }) {
             <h2>İletişim Bilgileri</h2>
             <div className="contactCard">
               <DetailItem label="Kurum" value={call.institution || call.funder} />
-              {call.contacts?.map((contact, index) => <div key={index} className="contactLinks">{contact.email && <a href={`mailto:${contact.email}`}><Mail size={15} /> {contact.email}</a>}{contact.phone && <a href={`tel:${contact.phone}`}><MessageCircle size={15} /> {contact.phone}</a>}{contact.website && <a href={contact.website} target="_blank" rel="noopener noreferrer">Web sitesi</a>}</div>)}
+              {call.contacts?.map((contact, index) => <div key={index} className="contactLinks">{contact.email && <a href={`mailto:${contact.email}`}><Mail size={15} /> {contact.email}</a>}{contact.phone && <a href={`tel:${contact.phone}`}><MessageCircle size={15} /> {contact.phone}</a>}{contact.website && <a href={ensureHttp(contact.website)} target="_blank" rel="noopener noreferrer">Web sitesi</a>}</div>)}
               {!call.contacts?.length && <p className="mutedText">İletişim bilgileri için resmî çağrı sayfasını kontrol edin.</p>}
             </div>
           </section>
@@ -1342,7 +1515,7 @@ function callThemes(call) {
 }
 
 function targetGroups(call) {
-  if (call.targetAudience?.length) return call.targetAudience;
+  if (call.targetAudience) return Array.isArray(call.targetAudience) ? call.targetAudience : [call.targetAudience];
   const text = `${call.title} ${call.summary} ${call.category}`.toLocaleLowerCase("tr-TR");
   const groups = [];
   if (/öğrenci|student|doctoral|doktora/.test(text)) groups.push("Öğrenciler ve doktora araştırmacıları");
@@ -1436,10 +1609,13 @@ function ProgrammesPage({ model }) {
     <>
       <Breadcrumb items={[{ label: "Destek Programları" }]} />
       <PageHero eyebrow="Katalog" title="Destek Programları" text="Excel kataloğu ve canlı çağrı kategorileri birlikte özetlenir." />
+      <div className="content">
+        <AdBanner type="custom" size="leaderboard" />
+      </div>
       <section className="content programmeGrid pageGrid">
         <article><Database size={26} /><strong>{catalogData.catalog.length} kayıtlı program</strong><p>Katalogdaki destek başlıkları canlı çağrılarla birlikte değerlendirilir.</p></article>
         {model.categories.map(([category, count]) => (
-          <article key={category}><WalletCards size={26} /><strong>{category}</strong><p>{count} açık çağrı bu alanda listeleniyor.</p><a href={`/cagrilar?category=${encodeURIComponent(category)}`}>Çağrıları Gör</a></article>
+          <article key={category}><WalletCards size={26} /><strong>{category}</strong><p>{count} açık çağrı bu alanda listeleniyor.</p><a href={`/cagrilar?category=${encodeURIComponent(category)}`} onClick={(event) => { event.preventDefault(); navigate(`/cagrilar?category=${encodeURIComponent(category)}`); }}>Çağrıları Gör</a></article>
         ))}
       </section>
     </>
@@ -1452,6 +1628,9 @@ function FundersPage({ model }) {
     <>
       <Breadcrumb items={[{ label: "Kurumlar" }]} />
       <PageHero eyebrow="Kurumlar" title="Aktif Fon Sağlayıcıları" text="Canlı taramada bulunan fon sağlayıcı kurumlar." />
+      <div className="content">
+        <AdBanner type="custom" size="leaderboard" />
+      </div>
       <section className="content funderGrid pageGrid">
         {model.funders.map(([funder, count]) => (
           <a key={funder} href={`/cagrilar?funder=${encodeURIComponent(funder)}&scope=${scopeToQuery(inferScopeFromFunder(funder, model.calls) || "Tümü")}`} onClick={(event) => {
@@ -1477,6 +1656,9 @@ function ProgrammeDetailPage({ route, model }) {
     <>
       <Breadcrumb items={[{ label: "Destek Programları", href: "/programlar" }, { label: category }]} />
       <PageHero eyebrow="Program" title={category} text={`${calls.length} çağrı bu program veya kategori altında listeleniyor.`} />
+      <div className="content">
+        <AdBanner type="custom" size="leaderboard" />
+      </div>
       <section className="content cardGrid">
         {calls.map((call) => <CallCard key={call.id} call={call} mode="link" />)}
         {!calls.length && <EmptyState title="Program çağrısı bulunamadı" text="Bu program için canlı kaynaklarda açık çağrı yakalanmadı." />}
@@ -1494,6 +1676,9 @@ function FunderDetailPage({ route, model }) {
     <>
       <Breadcrumb items={[{ label: "Kurumlar", href: "/kurumlar" }, { label: funder }]} />
       <PageHero eyebrow="Kurum" title={funder} text={`${calls.length} canlı çağrı bu kurumla ilişkilendirildi.`} />
+      <div className="content">
+        <AdBanner type="custom" size="leaderboard" />
+      </div>
       <section className="content cardGrid">
         {calls.map((call) => <CallCard key={call.id} call={call} mode="link" />)}
         {!calls.length && <EmptyState title="Kurum çağrısı bulunamadı" text="Bu kurum için canlı kaynaklarda açık çağrı yakalanmadı." />}
@@ -1508,6 +1693,9 @@ function CalendarPage({ model }) {
     <>
       <Breadcrumb items={[{ label: "Çağrı Takvimi" }]} />
       <PageHero eyebrow="Takvim" title="Çağrı Takvimi" text="Yaklaşan son başvuru tarihlerini liste görünümünde takip edin." />
+      <div className="content">
+        <AdBanner type="custom" size="leaderboard" />
+      </div>
       <CalendarSection urgent={model.urgent} />
     </>
   );
@@ -1521,12 +1709,15 @@ function CalendarSection({ urgent }) {
         <div className="calendarModes" aria-label="Takvim görünümü"><button type="button" className="active">Aylık</button><button type="button">Haftalık</button><button type="button">Liste</button></div>
       </div>
       <div className="calendarBoard">
-        <aside><h3>Filtreler</h3><label><input type="checkbox" defaultChecked /> TÜBİTAK</label><label><input type="checkbox" defaultChecked /> Avrupa</label><label><input type="checkbox" defaultChecked /> Uluslararası</label></aside>
+        <aside>
+          <h3>Filtreler</h3><label><input type="checkbox" defaultChecked /> TÜBİTAK</label><label><input type="checkbox" defaultChecked /> Avrupa</label><label><input type="checkbox" defaultChecked /> Uluslararası</label>
+          <AdBanner type="custom" size="sidebar" />
+        </aside>
         <div className="calendarList">
           <div className="calendarMonth"><CalendarDays size={22} /><strong>{monthLabel()}</strong></div>
           {urgent.slice(0, 20).map((call) => (
             <a key={call.id} className="calendarRow" href={callPath(call)} onClick={(event) => { event.preventDefault(); navigate(callPath(call)); }}>
-              <span>{formatDate(call.deadline)}</span><strong>{call.title}</strong><em>{urgencyLabel(call)}</em>
+              <span>{formatDate(call.deadline)}</span><strong>{cleanHtml(call.title)}</strong><em>{urgencyLabel(call)}</em>
             </a>
           ))}
           {!urgent.length && <p className="emptyInline">Takvimde yaklaşan çağrı bulunamadı.</p>}
@@ -1541,6 +1732,9 @@ function GuidePage() {
   return (
     <>
       <Breadcrumb items={[{ label: "Proje Rehberi" }]} />
+      <div className="content">
+        <AdBanner type="custom" size="leaderboard" />
+      </div>
       <section className="content guideSection">
         <GuideContent />
       </section>
@@ -1564,12 +1758,18 @@ function GuideArticlePage({ route }) {
           <p>{article.text}</p>
           <div><Clock3 size={16} /> {article.time} okuma</div>
         </header>
+        <div className="content" style={{ padding: "0 0 2rem 0" }}>
+          <AdBanner type="custom" size="leaderboard" />
+        </div>
         <div className="articleLayout">
           <aside className="articleToc" aria-label="Makale içindekiler">
             <strong>İçindekiler</strong>
             {article.sections.map((section) => (
               <a key={section.title} href={`#${normalizeSearch(section.title).replace(/\s+/g, "-")}`}>{section.title}</a>
             ))}
+            <div style={{ marginTop: "2rem" }}>
+              <AdBanner type="custom" size="sidebar" />
+            </div>
           </aside>
           <div className="articleBody">
             {article.sections.map((section) => (
@@ -1622,7 +1822,10 @@ function GuideContent() {
         <label><Search size={21} /><input placeholder="Rehberde arayın: bütçe, TRL, ortaklık..." aria-label="Rehberde ara" /></label>
       </div>
       <div className="guideLayout">
-        <nav aria-label="Rehber kategorileri">{["Tüm Kategoriler", "Çağrı Okuma", "Proje Yazımı", "Bütçe Hazırlama", "Ortaklık Kurma", "Değerlendirme Süreci"].map((item, index) => <a key={item} className={index === 0 ? "active" : ""} href="/rehber">{item}</a>)}</nav>
+        <div className="guideSidebar">
+          <nav aria-label="Rehber kategorileri">{["Tüm Kategoriler", "Çağrı Okuma", "Proje Yazımı", "Bütçe Hazırlama", "Ortaklık Kurma", "Değerlendirme Süreci"].map((item, index) => <a key={item} className={index === 0 ? "active" : ""} href="/rehber">{item}</a>)}</nav>
+          <AdBanner type="custom" size="sidebar" />
+        </div>
         <div className="guideCards">
           {guideCards.map((card) => (
             <GuideCard key={card.slug} card={card} />
@@ -1637,10 +1840,51 @@ function GuideContent() {
   );
 }
 
+function ContactPage() {
+  usePageMeta("İletişim | Hibe Rota", "Platformla ilgili geri bildirim ve kurumsal iletişim için bize ulaşın.");
+  return (
+    <>
+      <Breadcrumb items={[{ label: "İletişim" }]} />
+      <PageHero eyebrow="Kurumsal" title="İletişim" text="Platformla ilgili geri bildirim, kaynak önerisi ve kurumsal iletişim için bizimle paylaşım yapabilirsiniz." />
+      
+      <section className="content" style={{ padding: "40px 24px", maxWidth: "1000px", margin: "0 auto" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px" }}>
+          
+          <div className="card" style={{ padding: "40px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: "16px" }}>
+            <div style={{ width: "64px", height: "64px", borderRadius: "16px", background: "var(--primary-soft)", color: "var(--primary)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Mail size={32} />
+            </div>
+            <h3 style={{ margin: "8px 0 0", fontSize: "1.25rem", color: "var(--text)" }}>Bize Ulaşın</h3>
+            <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.5 }}>
+              Her türlü soru, görüş ve destek talebiniz için e-posta adresimiz üzerinden bizimle iletişime geçebilirsiniz.
+            </p>
+            <a href="mailto:veordijital@gmail.com" className="primaryButton" style={{ marginTop: "8px" }}>
+              veordijital@gmail.com
+            </a>
+          </div>
+
+          <div className="card" style={{ padding: "40px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: "16px", background: "linear-gradient(135deg, var(--primary-panel), #0f172a)", color: "#fff", border: "none" }}>
+            <div style={{ width: "64px", height: "64px", borderRadius: "16px", background: "rgba(255,255,255,0.1)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Globe2 size={32} />
+            </div>
+            <h3 style={{ margin: "8px 0 0", fontSize: "1.25rem", color: "#fff" }}>Markamız</h3>
+            <p style={{ margin: 0, color: "rgba(255,255,255,0.8)", lineHeight: 1.5 }}>
+              Bu web site <strong>Veor Collection</strong> markasının bir ürünüdür. Ürünlerimizi ve projelerimizi incelemek için web sitemizi ziyaret edin.
+            </p>
+            <a href="https://www.veorcollection.com" target="_blank" rel="noopener noreferrer" className="primaryButton" style={{ marginTop: "8px", background: "rgba(255,255,255,0.2)", color: "#fff", border: "1px solid rgba(255,255,255,0.1)" }}>
+              www.veorcollection.com
+            </a>
+          </div>
+
+        </div>
+      </section>
+    </>
+  );
+}
+
 function StaticPage({ type }) {
   const pages = {
     "/hakkimizda": ["Hakkımızda", "Hibe Rota, ulusal ve uluslararası destek çağrılarını tek noktada izlenebilir hale getiren üyelik gerektirmeyen bir bilgilendirme platformudur.", "Canlı kaynak taraması, export, RSS ve takvim çıktılarıyla başvuru ekiplerinin güncel fırsatları kaçırmamasını hedefler."],
-    "/iletisim": ["İletişim", "Platformla ilgili geri bildirim, kaynak önerisi ve kurumsal iletişim için bizimle paylaşım yapabilirsiniz.", "E-posta: bilgi@projedestekportali.local"],
     "/sss": ["Sıkça Sorulan Sorular", "Veriler nereden geliyor?", "Çağrılar TÜBİTAK, Avrupa ve uluslararası açık kaynaklardan saatlik cache düzeniyle yenilenir."],
     "/gizlilik-politikasi": ["Gizlilik Politikası", "Bu sürüm üyelik gerektirmez ve kullanıcı hesabı oluşturmaz.", "Arama ve filtre tercihleri yalnızca URL parametreleriyle çalışır; kişisel veri saklanmaz."],
     "/kullanim-kosullari": ["Kullanım Koşulları", "Portal bilgilendirme amacıyla sunulur.", "Başvuru öncesinde her çağrının resmi kaynak sayfasındaki güncel koşullar kontrol edilmelidir."],
@@ -1651,6 +1895,9 @@ function StaticPage({ type }) {
     <>
       <Breadcrumb items={[{ label: title }]} />
       <PageHero eyebrow="Kurumsal" title={title} text={text} />
+      <div className="content">
+        <AdBanner type="custom" size="leaderboard" />
+      </div>
       <section className="content staticContent">
         <article><p>{extra}</p><p>Bu sayfa mevcut web sitesindeki gerçek içerik ve işlevler temel alınarak oluşturulmuştur; üyelik, yönetim paneli veya haber modülü eklenmemiştir.</p></article>
       </section>
@@ -1724,6 +1971,21 @@ function App() {
       sort: params.get("sort") || "deadline_asc",
     };
   });
+
+  useEffect(() => {
+    const eventSource = new EventSource("/api/v1/stream");
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === "refresh") {
+          refresh();
+        }
+      } catch (e) {
+        console.error("SSE parse error", e);
+      }
+    };
+    return () => eventSource.close();
+  }, [refresh]);
 
   useEffect(() => {
     const params = route.params;
@@ -1800,7 +2062,8 @@ function App() {
   else if (route.pathname === "/rehber") page = <GuidePage />;
   else if (route.pathname.startsWith("/rehber/")) page = <GuideArticlePage route={route} />;
   else if (route.pathname === "/admin") page = <AdminPage model={model} errors={errors} fetchedAt={fetchedAt} />;
-  else if (["/hakkimizda", "/iletisim", "/sss", "/gizlilik-politikasi", "/kullanim-kosullari"].includes(route.pathname)) page = <StaticPage type={route.pathname} />;
+  else if (route.pathname === "/iletisim") page = <ContactPage />;
+  else if (["/hakkimizda", "/sss", "/gizlilik-politikasi", "/kullanim-kosullari"].includes(route.pathname)) page = <StaticPage type={route.pathname} />;
   else page = <NotFoundPage />;
 
   return (
