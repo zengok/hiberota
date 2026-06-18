@@ -86,7 +86,10 @@ function getDbPath(options = {}) {
 function ensureCallColumns(db) {
   const existing = new Set(db.prepare("PRAGMA table_info(calls)").all().map((row) => row.name));
   for (const [name, definition] of Object.entries(CALL_COLUMNS)) {
-    if (!existing.has(name)) db.exec(`ALTER TABLE calls ADD COLUMN ${name} ${definition}`);
+    if (!existing.has(name)) {
+      const legacyDefinition = definition.includes("CURRENT_TIMESTAMP") ? "TEXT" : definition;
+      db.exec(`ALTER TABLE calls ADD COLUMN ${name} ${legacyDefinition}`);
+    }
   }
 }
 
@@ -103,6 +106,18 @@ function applyPragmas(db) {
 
 function applyMigrations(db) {
   db.exec("CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at TEXT NOT NULL)");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS state_kv (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS calls (
+      id TEXT PRIMARY KEY,
+      data TEXT NOT NULL
+    );
+  `);
+  ensureStateColumns(db);
+  ensureCallColumns(db);
   const applied = new Set(db.prepare("SELECT id FROM schema_migrations").all().map((row) => row.id));
   const files = fs.existsSync(migrationsDir) ? fs.readdirSync(migrationsDir).filter((file) => file.endsWith(".sql")).sort() : [];
   const runMigration = db.transaction((file) => {
