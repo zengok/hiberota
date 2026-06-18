@@ -7,11 +7,14 @@
     "export:catalog": "/Users/macbook/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 scripts/export_catalog.py",
     "dev": "node server/index.mjs",
     "db:backup": "node scripts/backup_database.mjs",
+    "lint": "node --check server/index.mjs && node --check server/automation.mjs && node --check server/db.mjs && node --check server/database/sqlite-repository.mjs",
+    "typecheck": "npm run lint",
     "build": "vite build",
     "start": "NODE_ENV=production node server/index.mjs",
+    "worker": "node scripts/worker.mjs",
     "preview": "NODE_ENV=production node server/index.mjs",
     "test": "node --test test/*.test.mjs",
-    "check": "npm test && npm run build && npm audit --omit=dev"
+    "check": "npm run lint && npm test && npm run build && npm audit --omit=dev"
   },
   "engines": {
     "node": ">=20"
