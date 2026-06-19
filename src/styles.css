@@ -45,7 +45,9 @@ body {
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 
@@ -68,6 +70,498 @@ strong {
 .appShell {
   min-height: 100vh;
   background: var(--bg);
+}
+
+.newsletterOverlay {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 80;
+  pointer-events: none;
+}
+
+.newsletterCard {
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(720px, calc(100vh - 44px));
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-strong);
+  pointer-events: auto;
+}
+
+.newsletterClose {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.newsletterForm {
+  display: grid;
+  gap: 14px;
+}
+
+.newsletterIcon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--surface-low);
+  color: var(--accent);
+}
+
+.newsletterForm h2,
+.newsletterSuccess h2 {
+  margin: 0;
+  padding-right: 34px;
+  font-size: 22px;
+  line-height: 28px;
+  color: var(--primary);
+}
+
+.newsletterForm p,
+.newsletterSuccess p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 21px;
+}
+
+.newsletterForm label,
+.newsletterField {
+  display: grid;
+  gap: 7px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.newsletterForm input[type="email"],
+.newsletterForm select {
+  min-height: 44px;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: #ffffff;
+  color: var(--text);
+  font-weight: 650;
+}
+
+.newsletterChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.newsletterChips button {
+  min-height: 32px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: var(--surface-low);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.newsletterChips button.selected {
+  border-color: var(--secondary);
+  background: var(--primary);
+  color: #ffffff;
+}
+
+.newsletterConsent {
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px !important;
+  font-weight: 650 !important;
+}
+
+.newsletterConsent input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+}
+
+.newsletterConsent a {
+  color: var(--secondary);
+  text-decoration: underline;
+}
+
+.newsletterSubmit {
+  min-height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--secondary-button);
+  color: #ffffff;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.newsletterSubmit:disabled {
+  opacity: 0.65;
+  cursor: progress;
+}
+
+.newsletterError {
+  color: var(--danger) !important;
+  font-weight: 750;
+}
+
+.newsletterSuccess {
+  min-height: 220px;
+  display: grid;
+  align-content: center;
+  gap: 12px;
+  color: var(--accent);
+}
+
+.newsletterHoneypot {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.surveyModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(11, 28, 48, 0.42);
+}
+
+.surveyModal {
+  position: relative;
+  width: min(980px, 100%);
+  max-height: min(92vh, 860px);
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-strong);
+}
+
+.surveyModalClose {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.surveyModalIntro {
+  max-width: 760px;
+  display: grid;
+  gap: 8px;
+  padding-right: 44px;
+  margin-bottom: 18px;
+}
+
+.surveyModalIntro span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--secondary);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.surveyModalIntro h2 {
+  margin: 0;
+  color: var(--primary);
+  font-size: 28px;
+  line-height: 36px;
+}
+
+.surveyModalIntro p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 23px;
+}
+
+.surveyLater {
+  min-height: 38px;
+  margin-top: 14px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.surveyPage {
+  padding-bottom: 56px;
+}
+
+.surveyExperience {
+  display: grid;
+  grid-template-columns: minmax(340px, 0.92fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.surveyExperience.compact {
+  grid-template-columns: 1fr;
+}
+
+.surveyForm,
+.surveyResults {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.surveyStep {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.surveyStep > span {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--primary);
+  color: #ffffff;
+  font-weight: 900;
+}
+
+.surveyStep h2 {
+  margin: 0;
+  color: var(--primary);
+  font-size: 20px;
+  line-height: 28px;
+}
+
+.surveyStep p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 21px;
+}
+
+.surveyChoiceGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.surveyChoiceGrid button,
+.surveyChipGroup button {
+  min-height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.surveyChoiceGrid button.selected,
+.surveyChipGroup button.selected {
+  border-color: var(--secondary-button);
+  background: var(--primary);
+  color: #ffffff;
+}
+
+.surveyFields,
+.surveyBudget {
+  display: grid;
+  gap: 12px;
+}
+
+.surveyFields label,
+.surveyBudget,
+.surveyTwoCol label {
+  display: grid;
+  gap: 7px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.surveyFields input,
+.surveyFields textarea,
+.surveyFields select,
+.surveyBudget input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text);
+  font-weight: 650;
+}
+
+.surveyFields input,
+.surveyFields select,
+.surveyBudget input {
+  min-height: 44px;
+  padding: 0 12px;
+}
+
+.surveyFields textarea {
+  resize: vertical;
+  min-height: 98px;
+  padding: 11px 12px;
+}
+
+.surveyFields input:focus,
+.surveyFields textarea:focus,
+.surveyFields select:focus,
+.surveyBudget input:focus {
+  outline: 0;
+  border-color: var(--secondary-button);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
+}
+
+.surveyTwoCol {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.surveyChipGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.surveyChipGroup.themes button {
+  justify-content: flex-start;
+}
+
+.surveyError {
+  margin: 0;
+  color: var(--danger);
+  font-weight: 800;
+}
+
+.surveyActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.surveyActions button:not(.primaryAction) {
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--primary);
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.fundingMatchGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.fundingMatchCard {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--surface-low);
+}
+
+.fundingMatchCard > div:first-child span {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.fundingMatchCard h3 {
+  margin: 10px 0 0;
+  color: var(--primary);
+  font-size: 18px;
+  line-height: 25px;
+}
+
+.fundingMatchCard p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.fundingMatchCard a {
+  min-height: 38px;
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: var(--secondary-button);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.surveyCallMatches {
+  display: grid;
+  gap: 14px;
+}
+
+.surveyCallMatches h3 {
+  margin: 0;
+  color: var(--primary);
+  font-size: 22px;
 }
 
 .content {
@@ -3586,10 +4080,68 @@ strong {
 }
 
 @media (max-width: 768px) {
+  .newsletterOverlay {
+    inset: auto 0 0 0;
+    display: flex;
+    justify-content: center;
+    padding: 0 12px 12px;
+    background: linear-gradient(to top, rgba(11, 28, 48, 0.24), rgba(11, 28, 48, 0));
+  }
+
+  .newsletterCard {
+    width: 100%;
+    max-height: min(78vh, 680px);
+    padding: 18px;
+    border-radius: 8px 8px 0 0;
+  }
+
+  .newsletterForm h2,
+  .newsletterSuccess h2 {
+    font-size: 20px;
+    line-height: 26px;
+  }
+
+  .newsletterChips {
+    max-height: 118px;
+    overflow: auto;
+  }
+
   .ad-leaderboard {
     max-width: 320px;
     height: 50px;
     min-height: 50px;
+  }
+
+  .surveyModalBackdrop {
+    align-items: end;
+    padding: 12px;
+  }
+
+  .surveyModal {
+    max-height: 92vh;
+    padding: 18px;
+  }
+
+  .surveyModalIntro h2 {
+    font-size: 24px;
+    line-height: 31px;
+  }
+
+  .surveyExperience,
+  .surveyChoiceGrid,
+  .surveyTwoCol,
+  .fundingMatchGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .surveyForm,
+  .surveyResults {
+    padding: 16px;
+  }
+
+  .surveyResults .sectionHeader {
+    display: flex;
+    flex-direction: column;
   }
 }
 

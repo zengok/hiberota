@@ -34,6 +34,17 @@ import {
 } from "./automation.mjs";
 import { GLOBAL_FUNDING_DATABASE, matchGlobalFundingDatabase } from "./fundingMatcher.mjs";
 import { createScraperStrategies } from "./scrapers/index.mjs";
+import {
+  applyResendWebhook,
+  confirmSubscription,
+  createCallPublishedOutbox,
+  getSubscriptionRepository,
+  resendConfirmation,
+  subscribe,
+  unsubscribeByToken,
+  verifyWebhookSignature,
+} from "./email/subscription-service.mjs";
+import { FREQUENCIES, INTERESTS, maskEmail, verifySubscriberToken } from "./email/subscription-utils.mjs";
 
 process.on("unhandledRejection", (reason, promise) => {
   console.error("Unhandled Rejection at:", promise, "reason:", reason);
@@ -98,7 +109,7 @@ app.use((req, res, next) => {
 });
 
 app.use((req, res, next) => {
-  const allowed = new Set(["GET", "POST", "HEAD", "OPTIONS"]);
+  const allowed = new Set(["GET", "POST", "PUT", "HEAD", "OPTIONS"]);
   if (!allowed.has(req.method)) return res.status(405).json({ error: "method_not_allowed" });
   next();
 });
@@ -143,6 +154,14 @@ const matchLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "match_rate_limited" },
+});
+
+const subscriptionLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "subscription_rate_limited" },
 });
 
 const exportLimiter = rateLimit({
@@ -711,6 +730,12 @@ async function collectCalls() {
   await saveAutomationState(AUTOMATION_STATE_PATH, state);
   scheduleLinkHealthWorker(duplicateResult.calls);
   const publishedCalls = duplicateResult.calls.filter((call) => call.isPublished);
+  const emailNotifications = { created: 0, skipped: 0 };
+  for (const call of publishedCalls) {
+    const result = createCallPublishedOutbox(call);
+    if (result.created) emailNotifications.created += 1;
+    else emailNotifications.skipped += 1;
+  }
   return {
     calls: publishedCalls,
     errors,
@@ -727,6 +752,7 @@ async function collectCalls() {
       sources: Object.values(state.sources || {}).length,
       metrics: state.metrics,
     },
+    emailNotifications,
   };
 }
 
@@ -1192,6 +1218,105 @@ app.get("/api/v1/automation/link-health", async (_req, res) => {
 
 app.get("/api/v1/automation/jobs", (_req, res) => {
   res.json({ queue: automationQueue.snapshot(), supportedJobTypes: Object.values(JOB_TYPES) });
+});
+
+app.post("/api/v1/subscriptions", subscriptionLimiter, express.json({ limit: "12kb", strict: true }), async (req, res, next) => {
+  try {
+    const result = await subscribe(req.body || {}, req);
+    if (!result.ok && result.status !== 202) return res.status(result.status || 400).json({ status: result.code || "validation_error", field: result.field });
+    res.status(202).json({ status: "confirmation_sent" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/v1/subscriptions/confirm", (req, res) => {
+  const result = confirmSubscription(String(req.query.token || ""));
+  if (!result.ok) return res.redirect(`/abonelik-dogrulandi?status=${encodeURIComponent(result.code)}`);
+  res.redirect(`/abonelik-dogrulandi?status=success&token=${encodeURIComponent(result.manageToken)}`);
+});
+
+app.post("/api/v1/subscriptions/confirm", express.json({ limit: "8kb", strict: true }), (req, res) => {
+  const result = confirmSubscription(String(req.body?.token || ""));
+  if (!result.ok) return res.status(400).json({ status: result.code });
+  res.json({ status: "confirmed", token: result.manageToken });
+});
+
+app.post("/api/v1/subscriptions/resend-confirmation", subscriptionLimiter, express.json({ limit: "8kb", strict: true }), (req, res) => {
+  resendConfirmation(String(req.body?.email || ""));
+  res.status(202).json({ status: "confirmation_sent" });
+});
+
+app.post("/api/v1/subscriptions/unsubscribe", express.json({ limit: "8kb", strict: true }), (req, res) => {
+  const result = unsubscribeByToken(String(req.body?.token || req.query.token || ""));
+  if (!result.ok) return res.status(400).json({ status: "invalid_token" });
+  res.json({ status: "unsubscribed" });
+});
+
+app.get("/api/v1/subscriptions/unsubscribe", (req, res) => {
+  const result = unsubscribeByToken(String(req.query.token || ""));
+  res.redirect(`/abonelikten-cikildi?status=${result.ok ? "success" : "invalid_token"}`);
+});
+
+app.get("/api/v1/subscriptions/preferences", (req, res) => {
+  const subscriberId = verifySubscriberToken(String(req.query.token || ""));
+  const subscriber = subscriberId ? getSubscriptionRepository().findSubscriberById(subscriberId) : null;
+  if (!subscriber) return res.status(400).json({ status: "invalid_token" });
+  res.json({
+    email: maskEmail(subscriber.email),
+    status: subscriber.status,
+    frequency: subscriber.preferred_frequency,
+    interests: subscriber.preferences.filter((pref) => pref.preference_type === "interest").map((pref) => pref.preference_value),
+  });
+});
+
+app.put("/api/v1/subscriptions/preferences", express.json({ limit: "12kb", strict: true }), (req, res) => {
+  const subscriberId = verifySubscriberToken(String(req.body?.token || ""));
+  const repo = getSubscriptionRepository();
+  const subscriber = subscriberId ? repo.findSubscriberById(subscriberId) : null;
+  if (!subscriber) return res.status(400).json({ status: "invalid_token" });
+  const frequency = FREQUENCIES.has(req.body?.frequency) ? req.body.frequency : subscriber.preferred_frequency;
+  const interests = Array.isArray(req.body?.interests) ? req.body.interests.filter((item) => INTERESTS.has(item)).slice(0, 24) : [];
+  const updated = repo.updatePreferences(subscriberId, { frequency, interests });
+  res.json({
+    status: "updated",
+    frequency: updated.preferred_frequency,
+    interests: updated.preferences.filter((pref) => pref.preference_type === "interest").map((pref) => pref.preference_value),
+  });
+});
+
+app.post("/api/v1/email/webhooks/resend", express.raw({ type: "application/json", limit: "64kb" }), (req, res) => {
+  if (!verifyWebhookSignature(req.body, req.headers)) return res.status(401).json({ error: "invalid_signature" });
+  const payload = JSON.parse(req.body.toString("utf8"));
+  const result = applyResendWebhook(payload);
+  res.json(result);
+});
+
+app.get("/api/v1/admin/email/metrics", adminLimiter, adminAuth, (_req, res) => {
+  res.json({ metrics: getSubscriptionRepository().metrics() });
+});
+
+app.get("/api/v1/admin/email/subscribers", adminLimiter, adminAuth, (req, res) => {
+  const limit = Math.min(500, parsePositiveInt(req.query.limit, 100));
+  const subscribers = getSubscriptionRepository().listSubscribers(limit).map((subscriber) => ({ ...subscriber, email: maskEmail(subscriber.email) }));
+  res.json({ subscribers });
+});
+
+app.get("/api/v1/admin/email/notifications", adminLimiter, adminAuth, (req, res) => {
+  const limit = Math.min(500, parsePositiveInt(req.query.limit, 100));
+  res.json({ notifications: getSubscriptionRepository().listNotifications(limit) });
+});
+
+app.post("/api/v1/admin/email/test", adminLimiter, adminAuth, express.json({ limit: "8kb", strict: true }), (_req, res) => {
+  const outboxId = getSubscriptionRepository().enqueueOutbox("SEND_TEST_EMAIL", "admin-test", { createdAt: new Date().toISOString() });
+  res.status(202).json({ status: "queued", outboxId });
+});
+
+app.post("/api/v1/admin/email/subscribers/:id/suppress", adminLimiter, adminAuth, express.json({ limit: "8kb", strict: true }), (req, res) => {
+  const status = ["BOUNCED", "COMPLAINED", "SUPPRESSED"].includes(req.body?.status) ? req.body.status : "SUPPRESSED";
+  const subscriber = getSubscriptionRepository().suppressSubscriber(req.params.id, status);
+  if (!subscriber) return res.status(404).json({ error: "subscriber_not_found" });
+  res.json({ status: "suppressed", subscriber: { ...subscriber, email: maskEmail(subscriber.email) } });
 });
 
 app.post("/api/v1/automation/manual-review/:id/:action", adminLimiter, adminAuth, express.json({ limit: MAX_JSON_BODY, strict: true }), async (req, res) => {

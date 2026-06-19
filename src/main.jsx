@@ -35,6 +35,7 @@ import {
   ShieldCheck,
   Sparkles,
   SlidersHorizontal,
+  Star,
   Target,
   Timer,
   Users,
@@ -49,6 +50,7 @@ import { FavoriteButton } from "./components/FavoriteButton.jsx";
 import { useFavorites } from "./hooks/useFavorites.js";
 import { CallCardSkeleton } from "./components/SkeletonLoading.jsx";
 import { AdBanner } from "./components/AdBanner.jsx";
+import { NewsletterCard } from "./components/subscriptions/NewsletterCard.jsx";
 import "./styles.css";
 
 export function cleanHtml(text = "") {
@@ -88,6 +90,7 @@ const routeLinks = [
       { href: "/cagrilar/yaklasan", label: "Yaklaşan Çağrılar" },
     ],
   },
+  { href: "/hibe-anketi", label: "Hibe Anketi" },
   { href: "/programlar", label: "Destek Programları" },
   { href: "/kurumlar", label: "Kurumlar" },
   { href: "/takvim", label: "Çağrı Takvimi" },
@@ -102,6 +105,43 @@ const audiences = [
   { label: "Girişimci", query: "girişim", icon: Rocket },
   { label: "Firma", query: "KOBİ", icon: Building2 },
   { label: "Kurumsal", query: "kamu", icon: Landmark },
+];
+const SURVEY_SEEN_KEY = "hiberota:grant-survey-seen:v1";
+const surveyInitialState = {
+  userType: "student",
+  academicLevel: "Undergraduate Students",
+  researchField: "",
+  projectSummary: "",
+  location: "Türkiye",
+  targetDestination: "Turkey",
+  searchScope: "Turkey",
+  preferredScopes: ["national"],
+  themes: [],
+  budgetNeed: "",
+  timing: "open",
+};
+const surveyUserTypes = [
+  { value: "student", label: "Öğrenci", academicLevel: "Undergraduate Students", icon: GraduationCap },
+  { value: "graduate", label: "Yüksek lisans / doktora", academicLevel: "Graduate Students", icon: BookOpen },
+  { value: "academic", label: "Akademisyen", academicLevel: "Academics", icon: Landmark },
+  { value: "researcher", label: "Araştırmacı", academicLevel: "Postdocs", icon: Search },
+  { value: "company", label: "Şirket / KOBİ", academicLevel: "SMEs", icon: Building2 },
+  { value: "institution", label: "Kurum", academicLevel: "Institutions", icon: Users },
+];
+const surveyFields = [
+  "Sağlık ve yaşam bilimleri",
+  "Yapay zeka ve dijital teknolojiler",
+  "Enerji ve iklim",
+  "Tarım ve gıda",
+  "Sosyal bilimler",
+  "Sanayi ve üretim",
+  "Eğitim",
+  "Kültür ve yaratıcı endüstriler",
+];
+const surveyScopes = [
+  { value: "national", label: "Türkiye", destination: "Turkey" },
+  { value: "europe", label: "Avrupa", destination: "Europe" },
+  { value: "international", label: "Uluslararası", destination: "Global" },
 ];
 const guideCards = [
   {
@@ -2076,6 +2116,258 @@ function AdminPage({ model, errors, fetchedAt }) {
   );
 }
 
+function surveyPayload(form) {
+  const themes = [
+    form.researchField,
+    ...form.themes,
+    ...tokenizeSearch(form.projectSummary).filter((token) => token.length > 3).slice(0, 5),
+  ].filter(Boolean);
+  const preferredScopes = form.preferredScopes.length ? form.preferredScopes : ["national"];
+  const destinations = surveyScopes.filter((scope) => preferredScopes.includes(scope.value)).map((scope) => scope.destination);
+  return {
+    userType: form.userType,
+    academicLevel: form.academicLevel,
+    currentAcademicLevel: form.academicLevel,
+    researchField: [form.researchField, form.projectSummary].filter(Boolean).join(" - "),
+    projectSummary: form.projectSummary,
+    location: form.location,
+    targetDestination: form.targetDestination || destinations[0] || "Turkey",
+    searchScope: preferredScopes.includes("international") ? "global" : preferredScopes.join(","),
+    preferredScopes,
+    themes: [...new Set(themes)].slice(0, 12),
+    budgetNeed: form.budgetNeed,
+    timing: form.timing,
+  };
+}
+
+function GrantSurvey({ compact = false, onComplete }) {
+  const [form, setForm] = useState(surveyInitialState);
+  const [result, setResult] = useState(null);
+  const [status, setStatus] = useState("idle");
+  const [error, setError] = useState("");
+  const selectedType = surveyUserTypes.find((type) => type.value === form.userType) || surveyUserTypes[0];
+  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const toggleScope = (scope) => setForm((current) => {
+    const exists = current.preferredScopes.includes(scope);
+    const preferredScopes = exists ? current.preferredScopes.filter((item) => item !== scope) : [...current.preferredScopes, scope];
+    const firstScope = surveyScopes.find((item) => item.value === preferredScopes[0]);
+    return {
+      ...current,
+      preferredScopes: preferredScopes.length ? preferredScopes : ["national"],
+      targetDestination: firstScope?.destination || current.targetDestination,
+    };
+  });
+  const toggleTheme = (theme) => setForm((current) => ({
+    ...current,
+    themes: current.themes.includes(theme) ? current.themes.filter((item) => item !== theme) : [...current.themes, theme],
+    researchField: current.researchField || theme,
+  }));
+  const submit = async (event) => {
+    event.preventDefault();
+    setStatus("loading");
+    setError("");
+    try {
+      const response = await fetch("/api/v1/match", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(surveyPayload(form)),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload?.error || "Eşleştirme tamamlanamadı.");
+      setResult(payload);
+      setStatus("done");
+      if (onComplete) onComplete(payload);
+    } catch (err) {
+      setError(err.message || "Anket sonucu alınamadı.");
+      setStatus("error");
+    }
+  };
+  return (
+    <div className={`surveyExperience ${compact ? "compact" : ""}`}>
+      <form className="surveyForm" onSubmit={submit}>
+        <div className="surveyStep">
+          <span>1</span>
+          <div>
+            <h2>Başvuru profiliniz</h2>
+            <p>Öneriler önce başvuru sahibi uygunluğuna göre süzülür.</p>
+          </div>
+        </div>
+        <div className="surveyChoiceGrid">
+          {surveyUserTypes.map(({ value, label, academicLevel, icon: Icon }) => (
+            <button
+              key={value}
+              type="button"
+              className={form.userType === value ? "selected" : ""}
+              onClick={() => setForm((current) => ({ ...current, userType: value, academicLevel }))}
+            >
+              <Icon size={21} />
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
+        <div className="surveyFields">
+          <label>
+            Çalışma alanınız
+            <input value={form.researchField} onChange={(event) => update("researchField", event.target.value)} placeholder="Örn. yapay zeka, sağlık teknolojileri, tarımsal Ar-Ge" required />
+          </label>
+          <label>
+            Proje / araştırma konusu
+            <textarea value={form.projectSummary} onChange={(event) => update("projectSummary", event.target.value)} placeholder="Kısaca fikrinizi, hedef kitlenizi ve beklenen çıktıyı yazın." rows={compact ? 3 : 4} />
+          </label>
+          <div className="surveyTwoCol">
+            <label>
+              Bulunduğunuz ülke
+              <input value={form.location} onChange={(event) => update("location", event.target.value)} />
+            </label>
+            <label>
+              Aradığınız destek zamanı
+              <select value={form.timing} onChange={(event) => update("timing", event.target.value)}>
+                <option value="open">Şu an açık çağrılar</option>
+                <option value="upcoming">Yaklaşan çağrılar</option>
+                <option value="any">Tüm uygun fırsatlar</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div className="surveyStep">
+          <span>2</span>
+          <div>
+            <h2>Hibe kapsamı</h2>
+            <p>{selectedType.label} profili için uygun kapsam ve temaları seçin.</p>
+          </div>
+        </div>
+        <div className="surveyChipGroup" aria-label="Kapsam seçimi">
+          {surveyScopes.map((scope) => (
+            <button key={scope.value} type="button" className={form.preferredScopes.includes(scope.value) ? "selected" : ""} onClick={() => toggleScope(scope.value)}>
+              {scope.label}
+            </button>
+          ))}
+        </div>
+        <div className="surveyChipGroup themes" aria-label="Tematik alanlar">
+          {surveyFields.map((field) => (
+            <button key={field} type="button" className={form.themes.includes(field) ? "selected" : ""} onClick={() => toggleTheme(field)}>
+              {field}
+            </button>
+          ))}
+        </div>
+        <label className="surveyBudget">
+          Tahmini destek ihtiyacı
+          <input value={form.budgetNeed} onChange={(event) => update("budgetNeed", event.target.value)} placeholder="Örn. 500.000 TL, 100.000 EUR veya henüz belli değil" />
+        </label>
+        {error && <p className="surveyError" role="alert">{error}</p>}
+        <div className="surveyActions">
+          <button className="primaryAction" type="submit" disabled={status === "loading"}>
+            {status === "loading" ? <RefreshCw size={17} className="spin" /> : <Sparkles size={17} />}
+            En uygun hibeleri göster
+          </button>
+          {result && <button type="button" onClick={() => setResult(null)}>Yeni sonuç için formu düzenle</button>}
+        </div>
+      </form>
+      {result && <SurveyResults result={result} />}
+    </div>
+  );
+}
+
+function SurveyResults({ result }) {
+  const globalMatches = result?.globalFunding?.matches || [];
+  const calls = result?.calls || [];
+  return (
+    <section className="surveyResults" aria-live="polite">
+      <div className="sectionHeader">
+        <div>
+          <h2>Size en uygun eşleşmeler</h2>
+          <p>Sonuçlar profil uygunluğu, kapsam ve çalışma alanı sinyallerine göre sıralandı.</p>
+        </div>
+        <div className="health"><Star size={17} /> {globalMatches.length + calls.length} öneri</div>
+      </div>
+      {!!globalMatches.length && (
+        <div className="fundingMatchGrid">
+          {globalMatches.slice(0, 4).map((match) => (
+            <article key={match.id} className="fundingMatchCard">
+              <div>
+                <span>{match.match_score} puan</span>
+                <h3>{match.name}</h3>
+                <p>{match.region_country} · {match.type}</p>
+              </div>
+              <div className="tagCloud">
+                {match.target_audiences.slice(0, 4).map((item) => <span key={item}>{item}</span>)}
+              </div>
+              {!!match.example_programs?.length && (
+                <ul className="cleanList">
+                  {match.example_programs.slice(0, 3).map((program) => <li key={program}>{program}</li>)}
+                </ul>
+              )}
+              <a href={ensureHttp(match.website)} target="_blank" rel="noopener noreferrer">Resmî sayfayı aç <ArrowUpRight size={15} /></a>
+            </article>
+          ))}
+        </div>
+      )}
+      {!!calls.length && (
+        <div className="surveyCallMatches">
+          <h3>Açık çağrı önerileri</h3>
+          <div className="cardGrid">
+            {calls.slice(0, 4).map((call) => <CallCard key={call.id} call={call} mode="link" />)}
+          </div>
+        </div>
+      )}
+      {!globalMatches.length && !calls.length && (
+        <EmptyState title="Uygun eşleşme bulunamadı" text="Çalışma alanını veya kapsam seçimini genişleterek tekrar deneyin." />
+      )}
+    </section>
+  );
+}
+
+function GrantSurveyPage() {
+  usePageMeta("Hibe Anketi | Hibe Rota", "Profilinize göre en uygun açık proje hibe ve fon başvurularını bulun.");
+  return (
+    <>
+      <Breadcrumb items={[{ label: "Hibe Anketi" }]} />
+      <PageHero
+        eyebrow="Akıllı eşleştirme"
+        title="Profilinize en uygun hibe ve proje çağrısını bulun"
+        text="Kısa anketi doldurun; çalışma alanınız, başvuru sahibi tipiniz ve hedef kapsamınıza göre açık çağrılar ve fon programları listelensin."
+      />
+      <section className="content surveyPage">
+        <GrantSurvey />
+      </section>
+    </>
+  );
+}
+
+function FirstVisitSurveyModal() {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(SURVEY_SEEN_KEY)) return;
+      if (window.location.pathname === "/hibe-anketi") return;
+      setVisible(true);
+    } catch {
+      setVisible(false);
+    }
+  }, []);
+  const close = () => {
+    try {
+      window.localStorage.setItem(SURVEY_SEEN_KEY, new Date().toISOString());
+    } catch { /* localStorage unavailable */ }
+    setVisible(false);
+  };
+  if (!visible) return null;
+  return (
+    <div className="surveyModalBackdrop" role="presentation">
+      <section className="surveyModal" role="dialog" aria-modal="true" aria-labelledby="survey-modal-title">
+        <button className="surveyModalClose" type="button" aria-label="Anketi kapat" onClick={close}><X size={18} /></button>
+        <div className="surveyModalIntro">
+          <span><Sparkles size={18} /> İlk ziyaret anketi</span>
+          <h2 id="survey-modal-title">Size uygun hibe başvurusunu birlikte bulalım</h2>
+          <p>Bu anket yalnızca ilk girişte açılır. Daha sonra üst menüdeki Hibe Anketi bölümünden tekrar doldurabilirsiniz.</p>
+        </div>
+        <GrantSurvey compact onComplete={close} />
+        <button className="surveyLater" type="button" onClick={close}>Daha sonra dolduracağım</button>
+      </section>
+    </div>
+  );
+}
+
 function NotFoundPage() {
   usePageMeta("Sayfa Bulunamadı | Hibe Rota", "Aradığınız sayfa bulunamadı.");
   return (
@@ -2188,6 +2480,7 @@ function App() {
   if (route.pathname === "/") page = <HomePage model={model} filters={filters} setFilters={setFilters} />;
   else if (route.pathname === "/cagrilar" || route.pathname === "/cagrilar/ulusal" || route.pathname === "/cagrilar/avrupa" || route.pathname === "/cagrilar/uluslararasi" || route.pathname === "/cagrilar/yaklasan" || route.pathname === "/cagrilar/yeni") page = <CallsPage route={route} model={model} filters={filters} setFilters={setFilters} refresh={refresh} loading={loading} fetchedAt={fetchedAt} errors={errors} />;
   else if (route.pathname.startsWith("/cagrilar/") || route.pathname.startsWith("/cagri/")) page = <CallDetailPage route={route} model={model} />;
+  else if (route.pathname === "/hibe-anketi") page = <GrantSurveyPage />;
   else if (route.pathname === "/programlar") page = <ProgrammesPage model={model} />;
   else if (route.pathname.startsWith("/program/")) page = <ProgrammeDetailPage route={route} model={model} />;
   else if (route.pathname === "/kurumlar") page = <FundersPage model={model} />;
@@ -2205,6 +2498,8 @@ function App() {
     <div className="appShell">
       <Header route={route} />
       <main>{page}</main>
+      <FirstVisitSurveyModal />
+      <NewsletterCard />
       <Footer />
     </div>
   );
