@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { loadStateFromDb, saveStateToDb } from "../db.mjs";
 import { isSafeUrl } from "../security/url-safety.mjs";
+import { GLOBAL_FUNDING_SOURCES, GLOBAL_SOURCE_REGISTRY } from "./global-source-catalog.mjs";
 
 export const JOB_TYPES = {
   DISCOVER_SOURCE: "DISCOVER_SOURCE",
@@ -193,6 +194,7 @@ export const SOURCE_REGISTRY = [
     adapterName: "tuseb-adapter",
     config: { scope: "national", rateLimitMs: 1500 },
   },
+  ...GLOBAL_SOURCE_REGISTRY,
 ];
 
 export const FUNDING_SOURCES = [
@@ -316,6 +318,7 @@ export const FUNDING_SOURCES = [
     priority: 92,
     active: true,
   },
+  ...GLOBAL_FUNDING_SOURCES,
 ];
 
 const STATE_VERSION = 1;

@@ -46,6 +46,17 @@ Relative paths such as `.hiberota/database.sqlite` are safe for a single checkou
 
 The compatibility facade `server/automation.mjs` remains in place for existing imports and re-exports the modular automation entry point.
 
+## Global Source Expansion
+
+Global coverage is driven by `server/automation/global-source-catalog.mjs`. Add a new country, institution, or funding body there first, then use either:
+
+- a dedicated scraper in `server/scrapers/` when the source has an API or unusual page shape
+- the generic `global-html-discovery-adapter` when the source has normal public opportunity pages
+
+The generic discovery adapter only follows links on the same official host, filters funding-related keywords, rejects obvious news/result pages, extracts deadlines and support hints from page context, and sends every candidate through the shared normalization, duplicate, source-health, manual-review, and publish gates.
+
+Current seed catalog includes EU Funding & Tenders, UKRI, Canada grants, Australian GrantConnect, DAAD, ANR France, JSPS, WHO, Gates Foundation, and World Bank pages in addition to the existing Turkish, EU, Eureka, EuroAccess, Euresearch, and Grants.gov sources.
+
 ## Docker
 
 `docker-compose.yml` defines separate `app` and `worker` services. Both mount the same `hiberota-data` volume and use `/app/.hiberota/database.sqlite`, which keeps web reads and worker writes pointed at the same SQLite database.

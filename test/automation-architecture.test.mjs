@@ -35,6 +35,10 @@ test("shared contracts expose status and job values from one source", () => {
 test("source registry has unique IDs", () => {
   const ids = SOURCE_REGISTRY.map((source) => source.id);
   assert.equal(new Set(ids).size, ids.length);
+  assert.ok(ids.includes("ec-funding-tenders"));
+  assert.ok(ids.includes("ukri"));
+  assert.ok(ids.includes("canada-grants"));
+  assert.ok(ids.length >= 15);
 });
 
 test("worktree environment example documents an absolute shared database path", () => {
