@@ -1,6 +1,7 @@
 services:
   app:
     build: .
+    command: npm start
     ports:
       - "5173:5173"
     environment:
@@ -9,6 +10,7 @@ services:
       PORT: 5173
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-change-me-with-a-long-random-secret}
       DATABASE_PATH: /app/.hiberota/database.sqlite
+      DATABASE_BACKUP_DIR: /app/.hiberota/backups
       REDIS_URL: redis://redis:6379
     volumes:
       - hiberota-data:/app/.hiberota
@@ -28,6 +30,7 @@ services:
       NODE_ENV: production
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-change-me-with-a-long-random-secret}
       DATABASE_PATH: /app/.hiberota/database.sqlite
+      DATABASE_BACKUP_DIR: /app/.hiberota/backups
       REDIS_URL: redis://redis:6379
     volumes:
       - hiberota-data:/app/.hiberota

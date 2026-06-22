@@ -1,5 +1,12 @@
 node_modules/
 dist/
 .hiberota/
+.env
+.env.*
+!.env.example
+!.env.worktree.example
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 .DS_Store
 *.log

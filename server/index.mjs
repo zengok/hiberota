@@ -3,7 +3,6 @@ import compression from "compression";
 import helmet from "helmet";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import * as cheerio from "cheerio";
 import JSZip from "jszip";
 import PDFDocument from "pdfkit";
 import morgan from "morgan";
@@ -20,24 +19,16 @@ import {
   AutomationQueue,
   JOB_TYPES,
   SOURCE_REGISTRY,
-  buildLinkCheckCandidates,
-  buildAutomationMetrics,
-  buildManualReviewItems,
-  createSourceAdapters,
-  dedupeAndFlag,
-  detectChanges,
+  enqueueAutomationRefresh,
+  getAutomationMetrics,
+  getPublishedCalls,
   loadAutomationState,
-  mergeManualReviewQueue,
   saveAutomationState,
-  updateSourceHealth,
-  verifyLinks,
 } from "./automation.mjs";
 import { GLOBAL_FUNDING_DATABASE, matchGlobalFundingDatabase } from "./fundingMatcher.mjs";
-import { createScraperStrategies } from "./scrapers/index.mjs";
 import {
   applyResendWebhook,
   confirmSubscription,
-  createCallPublishedOutbox,
   getSubscriptionRepository,
   resendConfirmation,
   subscribe,
@@ -63,22 +54,15 @@ const isProd = process.env.NODE_ENV === "production";
 const HOST = process.env.HOST || (isProd ? "0.0.0.0" : "127.0.0.1");
 const HOUR_MS = 60 * 60 * 1000;
 const CACHE_TTL_MS = Number(process.env.CALL_CACHE_TTL_MS || HOUR_MS);
-const SOURCE_TIMEOUT_MS = Number(process.env.SOURCE_TIMEOUT_MS || 12000);
 const MAX_AGE_IMMUTABLE = "1y";
 const AUTOMATION_STATE_PATH = process.env.AUTOMATION_STATE_PATH || path.join(root, ".hiberota", "automation-state.json");
 const MAX_URL_LENGTH = Number(process.env.MAX_URL_LENGTH || 2048);
 const MAX_JSON_BODY = process.env.MAX_JSON_BODY || "32kb";
 const MAX_SSE_CLIENTS = Number(process.env.MAX_SSE_CLIENTS || 100);
 
-const USER_AGENT =
-  process.env.SOURCE_USER_AGENT || "Hiberota/1.0 (+project-call-monitor; contact: admin@example.com)";
-
 let callCache = null;
 let callCachePromise = null;
 let hourlyRefreshTimer = null;
-let linkHealthTimer = null;
-let linkHealthWorkerRunning = false;
-let queueRestored = false;
 const automationQueue = new AutomationQueue({ concurrency: Number(process.env.CRAWLER_CONCURRENCY || 2) });
 
 app.disable("x-powered-by");
@@ -197,14 +181,6 @@ app.use(
   }),
 );
 
-function absoluteUrl(base, href) {
-  try {
-    return new URL(href || base, base).toString();
-  } catch {
-    return base;
-  }
-}
-
 function normalizeWhitespace(value = "") {
   return String(value).replace(/<[a-z/][^>]*>/gi, " ").replace(/\s+/g, " ").trim();
 }
@@ -214,620 +190,12 @@ function normalizeBoundedText(value = "", maxLength = 500) {
   return normalizeWhitespace(value).slice(0, maxLength);
 }
 
-function normalizeQualityText(value = "") {
-  return normalizeWhitespace(value).toLocaleLowerCase("tr-TR");
-}
-
-const NON_APPLICATION_PATTERNS = [
-  /sonu[çc](?:lar[ıi])?\s+a[çc][ıi]kland[ıi]/i,
-  /ba[şs]vuru\s+sonu[çc](?:lar[ıi])?/i,
-  /[öo]n\s+de[ğg]erlendirme/i,
-  /de[ğg]erlendirme\s+raporu/i,
-  /raporu\s+sonu[çc](?:lar[ıi])?/i,
-  /sonu[çc]land[ıi]/i,
-  /son\s+a[şs]amaya\s+ge[çc]ildi/i,
-  /kazanan(?:lar)?/i,
-  /finalist(?:ler)?/i,
-  /(?:^|\s)[öo]d[üu]l(?:\s|$|ler|leri|[üu])/i,
-  /etkinlik/i,
-  /e[ğg]itim/i,
-  /webinar/i,
-];
-
-const APPLICATION_SIGNAL_PATTERNS = [
-  /son\s+ba[şs]vuru/i,
-  /ba[şs]vur(?:u|ular)\s+(?:a[çc][ıi]ld[ıi]|al[ıi]nacak|ba[şs]lad[ıi]|devam\s+ediyor)/i,
-  /ba[şs]vuruya\s+a[çc][ıi](?:k|ld[ıi])/i,
-  /[çc]a[ğg]r[ıi](?:s[ıi])?\s+(?:a[çc][ıi]ld[ıi]|yay[ıi]mland[ıi]|duyuruldu)/i,
-  /deadline/i,
-  /call\s+for/i,
-  /open\s+call/i,
-  /\bhibe\b/i,
-];
-
-function isNonApplicationAnnouncement(call) {
-  const text = normalizeQualityText(`${call.title || ""} ${call.summary || ""} ${call.source || ""}`);
-  return NON_APPLICATION_PATTERNS.some((pattern) => pattern.test(text));
-}
-
-function hasApplicationSignal(call) {
-  if (call.deadline) return true;
-  const text = normalizeQualityText(`${call.title || ""} ${call.summary || ""} ${call.source || ""}`);
-  return APPLICATION_SIGNAL_PATTERNS.some((pattern) => pattern.test(text));
-}
-
 function slug(value) {
   return normalizeWhitespace(value)
     .toLowerCase("tr")
     .replace(/[^a-z0-9ığüşöçİĞÜŞÖÇ]+/gi, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 80);
-}
-
-function parseDateLoose(value) {
-  if (!value) return null;
-  const clean = normalizeWhitespace(value);
-  const months = {
-    ocak: 0,
-    subat: 1,
-    şubat: 1,
-    mart: 2,
-    nisan: 3,
-    mayis: 4,
-    mayıs: 4,
-    haziran: 5,
-    temmuz: 6,
-    agustos: 7,
-    ağustos: 7,
-    eylul: 8,
-    eylül: 8,
-    ekim: 9,
-    kasim: 10,
-    kasım: 10,
-    aralik: 11,
-    aralık: 11,
-    jan: 0,
-    january: 0,
-    feb: 1,
-    february: 1,
-    mar: 2,
-    march: 2,
-    apr: 3,
-    april: 3,
-    may: 4,
-    jun: 5,
-    june: 5,
-    jul: 6,
-    july: 6,
-    aug: 7,
-    august: 7,
-    sep: 8,
-    september: 8,
-    oct: 9,
-    october: 9,
-    nov: 10,
-    november: 10,
-    dec: 11,
-    december: 11,
-  };
-  let match = clean.match(/\b(\d{1,2})[./-](\d{1,2})[./-](20\d{2})\b/);
-  if (match) return new Date(Date.UTC(Number(match[3]), Number(match[2]) - 1, Number(match[1]))).toISOString();
-  match = clean.match(/\b(\d{1,2})\s+([A-Za-zÇĞİÖŞÜçğıöşü]+)\s+(20\d{2})\b/i);
-  if (match) {
-    const month = months[match[2].toLocaleLowerCase("tr-TR")];
-    if (month !== undefined) return new Date(Date.UTC(Number(match[3]), month, Number(match[1]))).toISOString();
-  }
-  match = clean.match(/\b([A-Za-z]+)\s+(\d{1,2}),?\s+(20\d{2})\b/i);
-  if (match) {
-    const month = months[match[1].toLowerCase()];
-    if (month !== undefined) return new Date(Date.UTC(Number(match[3]), month, Number(match[2]))).toISOString();
-  }
-  return null;
-}
-
-function parseUsDate(value) {
-  const match = normalizeWhitespace(value).match(/\b(\d{1,2})\/(\d{1,2})\/(20\d{2})\b/);
-  if (!match) return parseDateLoose(value);
-  return new Date(Date.UTC(Number(match[3]), Number(match[1]) - 1, Number(match[2]))).toISOString();
-}
-
-function decodeEntities(value = "") {
-  return cheerio.load(`<span>${value}</span>`)("span").text();
-}
-
-function extractMoney(text) {
-  const match = normalizeWhitespace(text).match(
-    /((?:€|EUR|₺|TL|\$|USD)\s?[\d.,]+(?:\s?(?:milyon|million|billion|milyar))?|[\d.,]+\s?(?:€|EUR|₺|TL|\$|USD)(?:\s?(?:milyon|million|billion|milyar))?)/i,
-  );
-  return match ? match[1] : "";
-}
-
-function classifyScope(source, title = "") {
-  const value = `${source} ${title}`.toLocaleLowerCase("tr-TR");
-  if (value.includes("tübitak") || value.includes("tuseb") || value.includes("kosgeb")) return "Ulusal";
-  if (value.includes("ufuk") || value.includes("horizon") || value.includes("eureka") || value.includes("euro")) return "Avrupa";
-  return "Yurtdışı";
-}
-
-function statusFromDeadline(deadline) {
-  if (!deadline) return "upcoming";
-  const lastMoment = new Date(deadline);
-  lastMoment.setHours(23, 59, 59, 999);
-  return lastMoment.getTime() >= Date.now() ? "open" : "closed";
-}
-
-function qualityGateCalls(items) {
-  const rejected = [];
-  const calls = [];
-  const manualReviewCalls = [];
-  for (const call of items) {
-    let reason = "";
-    if (isNonApplicationAnnouncement(call)) reason = "announcement_or_result";
-    else if (!hasApplicationSignal(call)) reason = "missing_application_deadline";
-    else if (call.reviewStatus === "rejected" || call.isAccepted === false) reason = "low_institution_confidence";
-
-    if (reason) {
-      rejected.push({ id: call.id, title: call.title, source: call.source, reason });
-    } else {
-      const status = !call.deadline && call.status !== "closed" && hasApplicationSignal(call) ? "open" : call.status;
-      const confidence = !call.deadline && status === "open" && call.confidence !== "yüksek" ? "kontrol" : call.confidence;
-      const normalized = { ...call, status, confidence };
-      if (normalized.isPublished) calls.push(normalized);
-      else manualReviewCalls.push(normalized);
-    }
-  }
-  return { calls, manualReviewCalls, rejected };
-}
-
-async function getHtml(url, retries = 3) {
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS + (attempt * 5000));
-    try {
-      const response = await fetch(url, { headers: { "user-agent": USER_AGENT }, signal: controller.signal }).finally(() => {
-        clearTimeout(timer);
-      });
-      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-      return await response.text();
-    } catch (err) {
-      if (attempt === retries) throw err;
-      await new Promise(resolve => setTimeout(resolve, 2000 * Math.pow(2, attempt)));
-    }
-  }
-}
-
-async function scrapeTubitak() {
-  const sourceUrl = "https://tubitak.gov.tr/tr/duyuru";
-  const html = await getHtml(sourceUrl);
-  const $ = cheerio.load(html);
-  const items = [];
-
-  $(".view-content .views-row").each((_, row) => {
-    const $row = $(row);
-    const $link = $row.find(".views-field-title a[href]").first();
-    const title = normalizeWhitespace($link.text());
-    if (!/(çağrı|başvuru|hibe|destek\s+program|destek\s+çağr|programı\s+başvuru|proje\s+çağr)/i.test(title) || title.length < 18) return;
-    const href = absoluteUrl(sourceUrl, $link.attr("href"));
-    const context = normalizeWhitespace($row.text());
-    const summary = normalizeWhitespace($row.find(".views-field-field-ozet").text()) || context;
-    if (isNonApplicationAnnouncement({ title, summary, source: "TÜBİTAK Duyurular" })) return;
-    const deadlineMatch = context.match(/(?:son başvuru|başvurular|deadline)[^.;:]*[: ]\s*([^.;]{6,40})/i);
-    const deadline = deadlineMatch ? parseDateLoose(deadlineMatch[1]) : null;
-    const publishedAt =
-      $row.find("time[datetime]").first().attr("datetime") || parseDateLoose($row.find(".views-field-created").text());
-    items.push({
-      id: `tubitak-${slug(title)}`,
-      title,
-      funder: "TÜBİTAK",
-      source: "TÜBİTAK Duyurular",
-      scope: classifyScope("TÜBİTAK", title),
-      category: "Proje/Ar-Ge desteği",
-      support: extractMoney(context) || "Duyuru detayında belirtilir",
-      deadline,
-      publishedAt,
-      status: statusFromDeadline(deadline),
-      url: href,
-      summary: summary.slice(0, 260),
-      confidence: deadline ? "yüksek" : "orta",
-    });
-  });
-  return dedupe(items).slice(0, 30);
-}
-
-async function scrapeUfukAvrupa() {
-  const sourceUrl = "https://ufukavrupa.org.tr/tr";
-  const html = await getHtml(sourceUrl);
-  const $ = cheerio.load(html);
-  const text = normalizeWhitespace($("body").text());
-  const items = [];
-  const pattern = /Son Başvuru:\s*\d{1,2}\s+[A-Za-zÇĞİÖŞÜçğıöşü]+\s+20\d{2}/gi;
-  for (const match of text.matchAll(pattern)) {
-    const start = Math.max(0, match.index - 180);
-    const chunk = normalizeWhitespace(text.slice(start, match.index + match[0].length));
-    const deadline = parseDateLoose(match[0]);
-    const beforeDeadline = chunk.replace(/Son Başvuru:.*/i, "").trim();
-    const title = beforeDeadline
-      .split(/\s(?=[A-ZÇĞİÖŞÜ0-9][^.!?]{15,}(?:Çağr|Destek|Program|HORIZON))/)
-      .pop()
-      .trim();
-    if (!title || !/(çağrı|destek|horizon|eit|eic|euro|avrupa)/i.test(title)) continue;
-    items.push({
-      id: `ufuk-${slug(title)}`,
-      title,
-      funder: "Ufuk Avrupa / AB",
-      source: "Ufuk Avrupa Türkiye",
-      scope: "Avrupa",
-      category: "AB araştırma ve inovasyon",
-      support: extractMoney(chunk) || "Çağrı dokümanında belirtilir",
-      deadline,
-      publishedAt: null,
-      status: statusFromDeadline(deadline),
-      url: sourceUrl,
-      summary: chunk,
-      confidence: deadline ? "yüksek" : "orta",
-    });
-  }
-  return dedupe(items).slice(0, 15);
-}
-
-async function scrapeEureka() {
-  const sourceUrl = "https://www.eurekanetwork.org/programmes-and-calls/";
-  const html = await getHtml(sourceUrl);
-  const $ = cheerio.load(html);
-  const items = [];
-
-  $("h3").each((_, h3) => {
-    const title = normalizeWhitespace($(h3).text());
-    if (!title || /^(calls|open calls)$/i.test(title) || /select your options|programmes|insights|about us/i.test(title)) return;
-    const card = $(h3).closest(".relative, article, .rounded-lg");
-    const context = normalizeWhitespace(card.text() || $(h3).parent().text());
-    const deadline = parseDateLoose(context.match(/Deadline:\s*([^|+]+)/i)?.[1] || context);
-    if (!deadline && !/call|challenge|projects|session/i.test(title)) return;
-    const href = absoluteUrl(sourceUrl, card.find("a[href]").last().attr("href"));
-    items.push({
-      id: `eureka-${slug(title)}`,
-      title,
-      funder: "Eureka Network",
-      source: "Eureka Open Funding Opportunities",
-      scope: "Avrupa",
-      category: context.match(/(Network Projects|Eurostars|Globalstars|Investment Readiness|Clusters)/i)?.[1] || "Uluslararası Ar-Ge",
-      support: "Ulusal ajansa ve çağrıya göre değişir",
-      deadline,
-      publishedAt: null,
-      status: statusFromDeadline(deadline),
-      url: href || sourceUrl,
-      summary: context.slice(0, 260),
-      confidence: deadline ? "yüksek" : "orta",
-    });
-  });
-  return dedupe(items).slice(0, 30);
-}
-
-async function scrapeEuresearchOpenCalls() {
-  const sourceUrl = "https://www.euresearch.ch/en/our-services/inform/open-calls-137.html";
-  const html = await getHtml(sourceUrl);
-  const $ = cheerio.load(html);
-  const items = [];
-
-  $("table tr").each((_, row) => {
-    const cells = $(row)
-      .find("td")
-      .map((__, cell) => normalizeWhitespace($(cell).text()))
-      .get();
-    if (cells.length < 3) return;
-    const [topic, openDateText, deadlineText] = cells;
-    const deadline = parseDateLoose(deadlineText);
-    if (!topic || !deadline || statusFromDeadline(deadline) !== "open") return;
-    const code = topic.match(/^[A-Z0-9-]+/)?.[0] || "";
-    const title = topic.replace(code, "").trim() || topic;
-    const href = absoluteUrl(sourceUrl, $(row).find("a[href]").first().attr("href"));
-    items.push({
-      id: `euresearch-${slug(code || title)}`,
-      externalId: code,
-      title: code ? `${code} ${title}` : title,
-      funder: "Horizon Europe",
-      source: "Euresearch Horizon Europe Open Calls",
-      scope: "Avrupa",
-      category: "Horizon Europe çağrı konusu",
-      support: "Çağrı dokümanında belirtilir",
-      deadline,
-      publishedAt: parseDateLoose(openDateText),
-      status: "open",
-      url: href || sourceUrl,
-      summary: `${code || "Horizon Europe"} çağrısı. Açılış: ${openDateText}. Son başvuru: ${deadlineText}.`,
-      confidence: "yüksek",
-    });
-  });
-
-  return dedupe(items).slice(0, 120);
-}
-
-async function scrapeEuroAccessCalls() {
-  const sourceUrl = "https://euro-access.eu/en-us/calls";
-  const html = await getHtml(sourceUrl);
-  const $ = cheerio.load(html);
-  const items = [];
-
-  $("table tr").each((_, row) => {
-    const cells = $(row)
-      .find("td")
-      .map((__, cell) => normalizeWhitespace($(cell).text()))
-      .get();
-    if (cells.length < 3) return;
-    const [programme, title, deadlineText] = cells;
-    const deadline = parseDateLoose(deadlineText);
-    if (!programme || !title || !deadline || statusFromDeadline(deadline) !== "open") return;
-    const href = absoluteUrl(sourceUrl, $(row).find("a[href]").first().attr("href"));
-    items.push({
-      id: `euroaccess-${slug(`${programme}-${title}`)}`,
-      title,
-      funder: programme,
-      source: "EuroAccess EU Funding Calls",
-      scope: "Avrupa",
-      category: "AB fon çağrısı",
-      support: "Çağrı detayında belirtilir",
-      deadline,
-      publishedAt: null,
-      status: "open",
-      url: href || sourceUrl,
-      summary: `${programme} programı açık çağrısı. Son başvuru: ${deadlineText}.`,
-      confidence: "orta",
-    });
-  });
-
-  return dedupe(items).slice(0, 80);
-}
-
-async function scrapeGrantsGov() {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
-  const response = await fetch("https://api.grants.gov/v1/api/search2", {
-    method: "POST",
-    headers: { "content-type": "application/json", "user-agent": USER_AGENT },
-    body: JSON.stringify({
-      rows: 25,
-      keyword: "research innovation technology",
-      oppStatuses: "forecasted|posted",
-      sortBy: "closeDate|asc",
-    }),
-    signal: controller.signal,
-  }).finally(() => clearTimeout(timer));
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-  const payload = await response.json();
-  const hits = payload?.data?.oppHits || [];
-  return hits.map((hit) => ({
-    id: `grantsgov-${hit.id}`,
-    externalId: hit.number,
-    title: normalizeWhitespace(decodeEntities(hit.title)),
-    funder: hit.agencyName || hit.agency || hit.agencyCode || "Grants.gov",
-    source: "Grants.gov Search2 API",
-    scope: "Yurtdışı",
-    category: "ABD federal hibe",
-    support: "Detay sayfasında belirtilir",
-    deadline: parseUsDate(hit.closeDate),
-    publishedAt: parseUsDate(hit.openDate),
-    status: hit.oppStatus === "forecasted" ? "upcoming" : statusFromDeadline(parseUsDate(hit.closeDate)),
-    url: `https://www.grants.gov/search-results-detail/${hit.id}`,
-    summary: `${hit.number || ""} ${hit.agencyCode || ""} ${hit.alnist?.join(", ") || ""}`.trim(),
-    confidence: "yüksek",
-  }));
-}
-
-async function scrapeTuseb() {
-  const sourceUrl = "https://tbys.tuseb.gov.tr/";
-  const html = await getHtml(sourceUrl);
-  const $ = cheerio.load(html);
-  const text = normalizeWhitespace($("body").text());
-  const items = [];
-  const matches = text.matchAll(/(20\d{2}[^₺]{8,90}?(?:PROJE|AR-GE|DESTEK)[^₺]{0,140}?₺[\d.,]+)/gi);
-  for (const match of matches) {
-    const chunk = normalizeWhitespace(match[1]);
-    items.push({
-      id: `tuseb-${slug(chunk)}`,
-      title: chunk.replace(/₺.*/, "").slice(0, 140),
-      funder: "TÜSEB",
-      source: "TÜSEB TBYS",
-      scope: "Ulusal",
-      category: "Sağlık Ar-Ge",
-      support: extractMoney(chunk),
-      deadline: parseDateLoose(chunk),
-      publishedAt: null,
-      status: statusFromDeadline(parseDateLoose(chunk)),
-      url: sourceUrl,
-      summary: chunk,
-      confidence: "orta",
-    });
-  }
-  if (!items.length) {
-    items.push({
-      id: "tuseb-portal",
-      title: "TÜSEB aktif çağrı listesi",
-      funder: "TÜSEB",
-      source: "TÜSEB TBYS",
-      scope: "Ulusal",
-      category: "Sağlık Ar-Ge",
-      support: "Aktif çağrı listesinde gösterilir",
-      deadline: null,
-      publishedAt: null,
-      status: "open",
-      url: sourceUrl,
-      summary: "TÜSEB TBYS portalında aktif çağrı listesi bulunur; SPA içerik yapısı nedeniyle detaylar portal üzerinde doğrulanmalıdır.",
-      confidence: "kontrol",
-    });
-  }
-  return items.slice(0, 10);
-}
-
-function dedupe(items) {
-  const seen = new Set();
-  return items.filter((item) => {
-    const key = item.id || `${item.title}-${item.deadline}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-async function collectCalls() {
-  const state = await loadAutomationState(AUTOMATION_STATE_PATH);
-  restoreAutomationQueue(state);
-  const adapters = createSourceAdapters(createScraperStrategies());
-  const errors = [];
-  const calls = [];
-  await Promise.all(
-    adapters.map(async (adapter) => {
-      const started = Date.now();
-      automationQueue.enqueue({
-        type: JOB_TYPES.DISCOVER_SOURCE,
-        sourceId: adapter.id,
-        url: adapter.listUrls[0],
-        priority: adapter.sourceType === "official" ? 1 : 3,
-      });
-      try {
-        const rawItems = await adapter.extractStructuredData();
-        rawItems.forEach((item) => {
-          if (item?.url) {
-            automationQueue.enqueue({
-              type: JOB_TYPES.FETCH_DETAIL_PAGE,
-              sourceId: adapter.id,
-              url: item.url,
-              priority: adapter.sourceType === "official" ? 2 : 4,
-              payload: { listItemId: item.id },
-            });
-          }
-        });
-        const validated = await adapter.validateExtractedData(rawItems);
-        const normalized = await adapter.normalizeData(validated, state.calls || {});
-        calls.push(...normalized);
-        updateSourceHealth(state, adapter, { ok: true, durationMs: Date.now() - started, status: 200, found: normalized.length });
-      } catch (error) {
-        errors.push({ source: adapter.name, sourceId: adapter.id, message: error.message || "Kaynak okunamadı" });
-        updateSourceHealth(state, adapter, { ok: false, durationMs: Date.now() - started, error });
-      }
-    }),
-  );
-  calls.sort((a, b) => {
-    const ax = a.deadline ? new Date(a.deadline).getTime() : Number.MAX_SAFE_INTEGER;
-    const bx = b.deadline ? new Date(b.deadline).getTime() : Number.MAX_SAFE_INTEGER;
-    return ax - bx;
-  });
-  const unique = dedupe(calls);
-  const quality = qualityGateCalls(unique);
-  const acceptedCalls = [...quality.calls, ...quality.manualReviewCalls];
-  const duplicateResult = dedupeAndFlag(acceptedCalls);
-  const previousCalls = state.calls || {};
-  const changeLogs = detectChanges(previousCalls, duplicateResult.calls);
-  const linkHealthChecks = recentLinkHealthChecks(state.linkHealthChecks || [], duplicateResult.calls);
-  const reviewItems = buildManualReviewItems(duplicateResult.calls, duplicateResult.duplicates, linkHealthChecks);
-  enqueueLinkHealthJobs(duplicateResult.calls);
-  state.calls = Object.fromEntries(duplicateResult.calls.map((call) => [call.id, call]));
-  state.duplicates = duplicateResult.duplicates;
-  state.callChangeLogs = [...(state.callChangeLogs || []), ...changeLogs].slice(-1000);
-  state.linkHealthChecks = (state.linkHealthChecks || []).slice(-1000);
-  state.manualReviewQueue = mergeManualReviewQueue(state.manualReviewQueue || [], reviewItems);
-  state.crawlerJobs = automationQueue.persistableSnapshot();
-  state.metrics = buildAutomationMetrics(state, duplicateResult.calls);
-  await saveAutomationState(AUTOMATION_STATE_PATH, state);
-  scheduleLinkHealthWorker(duplicateResult.calls);
-  const publishedCalls = duplicateResult.calls.filter((call) => call.isPublished);
-  const emailNotifications = { created: 0, skipped: 0 };
-  for (const call of publishedCalls) {
-    const result = createCallPublishedOutbox(call);
-    if (result.created) emailNotifications.created += 1;
-    else emailNotifications.skipped += 1;
-  }
-  return {
-    calls: publishedCalls,
-    errors,
-    fetchedAt: new Date().toISOString(),
-    quality: {
-      rejected: quality.rejected.length,
-      rejectedSamples: quality.rejected.slice(0, 10),
-      duplicates: duplicateResult.duplicates.length,
-      manualReviewPending: state.metrics.manualReviewPending,
-      unpublished: duplicateResult.calls.length - publishedCalls.length,
-    },
-    automation: {
-      statePath: AUTOMATION_STATE_PATH,
-      sources: Object.values(state.sources || {}).length,
-      metrics: state.metrics,
-    },
-    emailNotifications,
-  };
-}
-
-function restoreAutomationQueue(state = {}) {
-  if (queueRestored) return;
-  automationQueue.restore(state.crawlerJobs || {});
-  queueRestored = true;
-}
-
-function enqueueLinkHealthJobs(calls = []) {
-  for (const candidate of buildLinkCheckCandidates(calls)) {
-    automationQueue.enqueue({
-      type: JOB_TYPES.VERIFY_LINKS,
-      sourceId: "",
-      url: candidate.url,
-      priority: 9,
-      payload: candidate,
-      idempotencyKey: `${JOB_TYPES.VERIFY_LINKS}:${candidate.callId}:${candidate.type}:${candidate.url}`,
-      timeoutMs: Number(process.env.LINK_VERIFY_TIMEOUT_MS || 5000),
-    });
-  }
-}
-
-function recentLinkHealthChecks(checks = [], calls = []) {
-  const liveIds = new Set(calls.map((call) => call.id));
-  const maxAgeMs = Number(process.env.LINK_HEALTH_MAX_AGE_MS || 24 * HOUR_MS);
-  const cutoff = Date.now() - maxAgeMs;
-  const byKey = new Map();
-  for (const check of checks) {
-    if (!liveIds.has(check.callId)) continue;
-    if (new Date(check.checkedAt || 0).getTime() < cutoff) continue;
-    const key = `${check.callId}:${check.type}:${check.url}`;
-    const previous = byKey.get(key);
-    if (!previous || new Date(check.checkedAt).getTime() > new Date(previous.checkedAt).getTime()) byKey.set(key, check);
-  }
-  return [...byKey.values()];
-}
-
-function scheduleLinkHealthWorker(calls = []) {
-  if (linkHealthTimer) return;
-  linkHealthTimer = setTimeout(() => {
-    linkHealthTimer = null;
-    runLinkHealthWorker(calls).catch((error) => console.error(`Link health worker failed: ${error.message}`));
-  }, Number(process.env.LINK_HEALTH_WORKER_DELAY_MS || 1000));
-}
-
-async function runLinkHealthWorker(calls = []) {
-  if (linkHealthWorkerRunning || !calls.length) return;
-  linkHealthWorkerRunning = true;
-  try {
-    const state = await loadAutomationState(AUTOMATION_STATE_PATH);
-    restoreAutomationQueue(state);
-    const candidates = buildLinkCheckCandidates(calls, { limit: Number(process.env.LINK_HEALTH_WORKER_LIMIT || process.env.LINK_VERIFY_LIMIT || 25) });
-    const checks = await verifyLinks(calls, {
-      timeoutMs: Number(process.env.LINK_VERIFY_TIMEOUT_MS || 5000),
-      candidates,
-    });
-    for (const check of checks) {
-      automationQueue.completeByIdempotencyKey(
-        `${JOB_TYPES.VERIFY_LINKS}:${check.callId}:${check.type}:${check.url}`,
-        { status: check.status, httpStatus: check.httpStatus || null },
-      );
-    }
-    const currentCalls = Object.values(state.calls || {});
-    state.linkHealthChecks = [...(state.linkHealthChecks || []), ...checks].slice(-1000);
-    state.manualReviewQueue = mergeManualReviewQueue(
-      state.manualReviewQueue || [],
-      buildManualReviewItems(currentCalls, state.duplicates || [], recentLinkHealthChecks(state.linkHealthChecks, currentCalls)),
-    );
-    state.crawlerJobs = automationQueue.persistableSnapshot();
-    state.metrics = buildAutomationMetrics(state, currentCalls);
-    await saveAutomationState(AUTOMATION_STATE_PATH, state);
-  } finally {
-    linkHealthWorkerRunning = false;
-  }
 }
 
 async function getCachedCalls({ force = false } = {}) {
@@ -841,7 +209,11 @@ async function getCachedCalls({ force = false } = {}) {
     return { ...payload, cache: { status: "shared-refresh", ttlMs: CACHE_TTL_MS, ageMs: 0 } };
   }
 
-  callCachePromise = collectCalls()
+  callCachePromise = (async () => {
+    const refreshQueued = force ? await enqueueAutomationRefresh({ statePath: AUTOMATION_STATE_PATH }) : null;
+    const payload = await getPublishedCalls({ statePath: AUTOMATION_STATE_PATH });
+    return refreshQueued ? { ...payload, refreshQueued } : payload;
+  })()
     .then((payload) => {
       callCache = { payload, cachedAtMs: Date.now() };
       if (typeof broadcastRefresh === "function") broadcastRefresh();
@@ -852,7 +224,7 @@ async function getCachedCalls({ force = false } = {}) {
     });
 
   const payload = await callCachePromise;
-  return { ...payload, cache: { status: force ? "forced-refresh" : "miss", ttlMs: CACHE_TTL_MS, ageMs: 0 } };
+  return { ...payload, cache: { status: force ? "queued-refresh" : "miss", ttlMs: CACHE_TTL_MS, ageMs: 0 } };
 }
 
 function msUntilNextHour() {
@@ -1192,12 +564,11 @@ app.get("/api/v1/automation/sources", async (_req, res) => {
 });
 
 app.get("/api/v1/automation/metrics", async (_req, res) => {
-  const payload = await getCachedCalls();
-  const state = await loadAutomationState(AUTOMATION_STATE_PATH);
+  const metrics = await getAutomationMetrics({ statePath: AUTOMATION_STATE_PATH });
   res.json({
-    metrics: state.metrics || buildAutomationMetrics(state, payload.calls),
-    quality: payload.quality || {},
-    cache: payload.cache || {},
+    metrics: metrics.metrics,
+    quality: metrics.quality,
+    cache: callCache ? { status: "hit", ttlMs: CACHE_TTL_MS, ageMs: Date.now() - callCache.cachedAtMs } : { status: "empty" },
   });
 });
 
@@ -1216,7 +587,9 @@ app.get("/api/v1/automation/link-health", async (_req, res) => {
   res.json({ checks: (state.linkHealthChecks || []).slice(-250).reverse() });
 });
 
-app.get("/api/v1/automation/jobs", (_req, res) => {
+app.get("/api/v1/automation/jobs", async (_req, res) => {
+  const state = await loadAutomationState(AUTOMATION_STATE_PATH);
+  automationQueue.restore(state.crawlerJobs || {});
   res.json({ queue: automationQueue.snapshot(), supportedJobTypes: Object.values(JOB_TYPES) });
 });
 
@@ -1340,9 +713,10 @@ app.post("/api/v1/automation/manual-review/:id/:action", adminLimiter, adminAuth
 app.post("/api/v1/automation/sources/:id/refresh", refreshLimiter, adminAuth, async (req, res) => {
   const source = SOURCE_REGISTRY.find((item) => item.id === req.params.id);
   if (!source) return res.status(404).json({ error: "source_not_found", requestId: req.requestId });
-  const payload = await getCachedCalls({ force: true });
+  const queued = await enqueueAutomationRefresh({ statePath: AUTOMATION_STATE_PATH, sourceId: source.id });
+  callCache = null;
   return res.json({
-    data: { sourceId: source.id, refreshedAt: payload.fetchedAt },
+    data: { sourceId: source.id, queuedAt: queued.fetchedAt, queued: queued.queued },
     meta: { generatedAt: new Date().toISOString(), requestId: req.requestId },
   });
 });
