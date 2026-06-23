@@ -49,9 +49,17 @@ import catalogData from "./data/catalog.json";
 import { FavoriteButton } from "./components/FavoriteButton.jsx";
 import { useFavorites } from "./hooks/useFavorites.js";
 import { CallCardSkeleton } from "./components/SkeletonLoading.jsx";
-import { AdBanner } from "./components/AdBanner.jsx";
 import { NewsletterCard } from "./components/subscriptions/NewsletterCard.jsx";
 import "./styles.css";
+
+const SITE_URL = "https://hiberota.com";
+const SITE_NAME = "Hibe Rota";
+const SITE_LOGO_URL = `${SITE_URL}/favicon.svg`;
+const DEFAULT_SEO_TITLE = "Hibe Rota | Hibe, Fon ve Proje Destek Çağrıları";
+const DEFAULT_SEO_DESCRIPTION =
+  "Türkiye, Avrupa Birliği ve uluslararası hibe, fon, teşvik ve proje destek çağrılarını tek panelde takip edin; son başvuru tarihleri, kurumlar ve başvuru rehberi.";
+const DEFAULT_SEO_KEYWORDS =
+  "hibe, fon, proje destekleri, hibe çağrıları, fon çağrıları, TÜBİTAK destekleri, KOSGEB destekleri, Avrupa Birliği hibeleri, proje başvurusu, destek programları";
 
 export function cleanHtml(text = "") {
   return String(text).replace(/<[a-z/][^>]*>/gi, " ").replace(/\s+/g, " ").trim();
@@ -263,9 +271,6 @@ const defaultSiteContent = {
     logoSvg: "/logo.svg",
     logoPng: "/logo.png",
     heroImage: "",
-    leaderboardAdImage: "",
-    sidebarAdImage: "",
-    adLink: "",
   },
   home: {
     heroTitle: "Projenize uygun destek çağrısını bulun",
@@ -820,14 +825,29 @@ function useSiteContent() {
   return { ...state, refresh };
 }
 
-function usePageMeta(title, description) {
+function usePageMeta(title, description, options = {}) {
   useEffect(() => {
+    const canonicalPath = window.location.pathname;
+    const canonicalUrl = `${SITE_URL}${canonicalPath}`;
+    const image = options.image || `${SITE_URL}/logo.png`;
+    const keywords = options.keywords || DEFAULT_SEO_KEYWORDS;
+
     document.title = title;
     const metas = [
       ["description", description],
+      ["keywords", keywords],
+      ["robots", "index, follow"],
       ["og:title", title, "property"],
       ["og:description", description, "property"],
       ["og:type", "website", "property"],
+      ["og:site_name", SITE_NAME, "property"],
+      ["og:locale", "tr_TR", "property"],
+      ["og:url", canonicalUrl, "property"],
+      ["og:image", image, "property"],
+      ["twitter:card", "summary_large_image"],
+      ["twitter:title", title],
+      ["twitter:description", description],
+      ["twitter:image", image],
     ];
     metas.forEach(([name, content, attr = "name"]) => {
       let meta = document.head.querySelector(`meta[${attr}="${name}"]`);
@@ -844,8 +864,8 @@ function usePageMeta(title, description) {
       canonical.setAttribute("rel", "canonical");
       document.head.appendChild(canonical);
     }
-    canonical.setAttribute("href", `${window.location.origin}${window.location.pathname}`);
-  }, [title, description]);
+    canonical.setAttribute("href", canonicalUrl);
+  }, [title, description, options.image, options.keywords]);
 }
 
 function filterCalls(calls, filters) {
@@ -904,14 +924,21 @@ function SectionTitle({ eyebrow, title, text }) {
   );
 }
 
-function SiteAd({ siteContent, size = "leaderboard" }) {
-  const image = size === "sidebar" ? siteContent.images.sidebarAdImage : siteContent.images.leaderboardAdImage;
-  return <AdBanner type="custom" size={size} image={image} link={siteContent.images.adLink || "#"} />;
-}
-
 function Header({ route, siteContent }) {
   const [open, setOpen] = useState(false);
   const active = (href) => href === "/" ? route.pathname === "/" : route.pathname.startsWith(href);
+
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 1181px)");
+    const closeDesktopMenu = (event) => {
+      if (event.matches) setOpen(false);
+    };
+
+    closeDesktopMenu(query);
+    query.addEventListener("change", closeDesktopMenu);
+    return () => query.removeEventListener("change", closeDesktopMenu);
+  }, []);
+
   return (
     <header className="topNav">
       <a className="brand" href="/" onClick={(event) => {
@@ -1361,8 +1388,6 @@ function CallsAside({ calls, errors, siteContent }) {
         }}>Rehberi Aç</a>
       </div>
 
-      <SiteAd siteContent={siteContent} size="sidebar" />
-
       {featured && (
         <div className="asidePanel">
           <span>Öne Çıkan</span>
@@ -1394,7 +1419,51 @@ function CallsAside({ calls, errors, siteContent }) {
 }
 
 function HomePage({ model, filters, setFilters, siteContent }) {
-  usePageMeta("Hibe Rota | Ana Sayfa", "Ulusal ve uluslararası hibe, fon ve proje destek çağrılarını canlı kaynaklardan izleyin.");
+  usePageMeta(DEFAULT_SEO_TITLE, DEFAULT_SEO_DESCRIPTION);
+  useEffect(() => {
+    const jsonLd = {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Organization",
+          "@id": `${SITE_URL}/#organization`,
+          name: SITE_NAME,
+          url: SITE_URL,
+          logo: SITE_LOGO_URL,
+          description: DEFAULT_SEO_DESCRIPTION,
+          sameAs: [],
+        },
+        {
+          "@type": "WebSite",
+          "@id": `${SITE_URL}/#website`,
+          name: SITE_NAME,
+          alternateName: "Hibe ve Fon Çağrı Takip Platformu",
+          url: SITE_URL,
+          publisher: { "@id": `${SITE_URL}/#organization` },
+          description: DEFAULT_SEO_DESCRIPTION,
+          inLanguage: "tr-TR",
+          keywords: DEFAULT_SEO_KEYWORDS,
+          potentialAction: {
+            "@type": "SearchAction",
+            target: `${SITE_URL}/cagrilar?q={search_term_string}`,
+            "query-input": "required name=search_term_string",
+          },
+        },
+      ],
+    };
+    let script = document.getElementById("site-jsonld");
+    if (!script) {
+      script = document.createElement("script");
+      script.type = "application/ld+json";
+      script.id = "site-jsonld";
+      document.head.appendChild(script);
+    }
+    script.textContent = JSON.stringify(jsonLd);
+    return () => {
+      document.getElementById("site-jsonld")?.remove();
+    };
+  }, []);
+
   const { openCalls, urgent, newlyOpened, recentlyDetected, funders, categories, urgentWeek } = model;
   
   const { favoriteIds } = useFavorites();
@@ -1459,10 +1528,6 @@ function HomePage({ model, filters, setFilters, siteContent }) {
           <span><strong>{model.sourceCount}</strong> Aktif Kaynak</span>
         </div>
       </section>
-
-      <div className="content">
-        <SiteAd siteContent={siteContent} size="leaderboard" />
-      </div>
 
       {favoriteCalls.length > 0 && (
         <section className="content dashboardIntro">
@@ -1817,7 +1882,6 @@ function CallDetailPage({ route, model }) {
           <div className="detailActions sideActions">
             <button type="button" onClick={copyLink}><Copy size={15} /> Bağlantıyı Kopyala</button>
           </div>
-          <AdBanner type="custom" size="sidebar" />
         </aside>
         <div className="detailContent">
           <section className="detailBlock">
@@ -1828,9 +1892,6 @@ function CallDetailPage({ route, model }) {
             <h2>Çağrının Amacı</h2>
             <p className="leadText">{cleanHtml(call.purpose || call.description || call.summary || "Bu çağrı, resmî kaynakta belirtilen kapsamda proje, araştırma veya iş birliği faaliyetlerini desteklemeyi amaçlar.")}</p>
           </section>
-          <div className="content" style={{ padding: 0 }}>
-            <AdBanner type="custom" size="leaderboard" />
-          </div>
           {!!callBenefits(call).length && <section className="detailBlock">
             <h2>Program Ne Sağlıyor?</h2>
             <div className="benefitGrid">
@@ -2104,9 +2165,6 @@ function ProgrammesPage({ model }) {
     <>
       <Breadcrumb items={[{ label: "Destek Programları" }]} />
       <PageHero eyebrow="Katalog" title="Destek Programları" text="Excel kataloğu ve canlı çağrı kategorileri birlikte özetlenir." />
-      <div className="content">
-        <AdBanner type="custom" size="leaderboard" />
-      </div>
       <section className="content programmeGrid pageGrid">
         <article><Database size={26} /><strong>{catalogData.catalog.length} kayıtlı program</strong><p>Katalogdaki destek başlıkları canlı çağrılarla birlikte değerlendirilir.</p></article>
         {model.categories.map(([category, count]) => (
@@ -2123,9 +2181,6 @@ function FundersPage({ model }) {
     <>
       <Breadcrumb items={[{ label: "Kurumlar" }]} />
       <PageHero eyebrow="Kurumlar" title="Aktif Fon Sağlayıcıları" text="Canlı taramada bulunan fon sağlayıcı kurumlar." />
-      <div className="content">
-        <AdBanner type="custom" size="leaderboard" />
-      </div>
       <section className="content funderGrid pageGrid">
         {model.funders.map(([funder, count]) => (
           <a key={funder} href={`/cagrilar?funder=${encodeURIComponent(funder)}&scope=${scopeToQuery(inferScopeFromFunder(funder, model.calls) || "Tümü")}`} onClick={(event) => {
@@ -2151,9 +2206,6 @@ function ProgrammeDetailPage({ route, model }) {
     <>
       <Breadcrumb items={[{ label: "Destek Programları", href: "/programlar" }, { label: category }]} />
       <PageHero eyebrow="Program" title={category} text={`${calls.length} çağrı bu program veya kategori altında listeleniyor.`} />
-      <div className="content">
-        <AdBanner type="custom" size="leaderboard" />
-      </div>
       <section className="content cardGrid">
         {calls.map((call) => <CallCard key={call.id} call={call} mode="link" />)}
         {!calls.length && <EmptyState title="Program çağrısı bulunamadı" text="Bu program için canlı kaynaklarda açık çağrı yakalanmadı." />}
@@ -2171,9 +2223,6 @@ function FunderDetailPage({ route, model }) {
     <>
       <Breadcrumb items={[{ label: "Kurumlar", href: "/kurumlar" }, { label: funder }]} />
       <PageHero eyebrow="Kurum" title={funder} text={`${calls.length} canlı çağrı bu kurumla ilişkilendirildi.`} />
-      <div className="content">
-        <AdBanner type="custom" size="leaderboard" />
-      </div>
       <section className="content cardGrid">
         {calls.map((call) => <CallCard key={call.id} call={call} mode="link" />)}
         {!calls.length && <EmptyState title="Kurum çağrısı bulunamadı" text="Bu kurum için canlı kaynaklarda açık çağrı yakalanmadı." />}
@@ -2188,9 +2237,6 @@ function CalendarPage({ model }) {
     <>
       <Breadcrumb items={[{ label: "Çağrı Takvimi" }]} />
       <PageHero eyebrow="Takvim" title="Çağrı Takvimi" text="Yaklaşan son başvuru tarihlerini liste görünümünde takip edin." />
-      <div className="content">
-        <AdBanner type="custom" size="leaderboard" />
-      </div>
       <CalendarSection urgent={model.urgent} />
     </>
   );
@@ -2206,7 +2252,6 @@ function CalendarSection({ urgent }) {
       <div className="calendarBoard">
         <aside>
           <h3>Filtreler</h3><label><input type="checkbox" defaultChecked /> TÜBİTAK</label><label><input type="checkbox" defaultChecked /> Avrupa</label><label><input type="checkbox" defaultChecked /> Uluslararası</label>
-          <AdBanner type="custom" size="sidebar" />
         </aside>
         <div className="calendarList">
           <div className="calendarMonth"><CalendarDays size={22} /><strong>{monthLabel()}</strong></div>
@@ -2227,9 +2272,6 @@ function GuidePage({ siteContent }) {
   return (
     <>
       <Breadcrumb items={[{ label: "Proje Rehberi" }]} />
-      <div className="content">
-        <SiteAd siteContent={siteContent} size="leaderboard" />
-      </div>
       <section className="content guideSection">
         <GuideContent siteContent={siteContent} />
       </section>
@@ -2255,18 +2297,12 @@ function GuideArticlePage({ route, siteContent }) {
           <div><Clock3 size={16} /> {article.time} okuma</div>
           {article.coverImage && <img className="articleCoverImage" src={article.coverImage} alt="" aria-hidden="true" />}
         </header>
-        <div className="content" style={{ padding: "0 0 2rem 0" }}>
-          <SiteAd siteContent={siteContent} size="leaderboard" />
-        </div>
         <div className="articleLayout">
           <aside className="articleToc" aria-label="Makale içindekiler">
             <strong>İçindekiler</strong>
             {article.sections.map((section) => (
               <a key={section.title} href={`#${normalizeSearch(section.title).replace(/\s+/g, "-")}`}>{section.title}</a>
             ))}
-            <div style={{ marginTop: "2rem" }}>
-              <SiteAd siteContent={siteContent} size="sidebar" />
-            </div>
           </aside>
           <div className="articleBody">
             {article.sections.map((section) => (
@@ -2322,7 +2358,6 @@ function GuideContent({ siteContent }) {
       <div className="guideLayout">
         <div className="guideSidebar">
           <nav aria-label="Rehber kategorileri">{siteContent.guide.categories.map((item, index) => <a key={item} className={index === 0 ? "active" : ""} href="/rehber">{item}</a>)}</nav>
-          <SiteAd siteContent={siteContent} size="sidebar" />
         </div>
         <div className="guideCards">
           {articles.map((card) => (
@@ -2527,9 +2562,6 @@ function StaticPage({ type }) {
     <>
       <Breadcrumb items={[{ label: title }]} />
       <PageHero eyebrow="Kurumsal" title={title} text={text} />
-      <div className="content">
-        <AdBanner type="custom" size="leaderboard" />
-      </div>
       <section className="content staticContent">
         <article><p>{extra}</p><p>Bu sayfa mevcut web sitesindeki gerçek içerik ve işlevler temel alınarak oluşturulmuştur; üyelik, yönetim paneli veya haber modülü eklenmemiştir.</p></article>
       </section>
@@ -2753,7 +2785,7 @@ function AdminPage({ model, errors, fetchedAt, siteContent, onContentSaved }) {
   return (
     <>
       <Breadcrumb items={[{ label: "Admin" }]} />
-      <PageHero eyebrow="Admin" title="İçerik ve Site Yönetimi" text="Görselleri, ana sayfa bloklarını, sponsor alanlarını ve proje rehberi blog yazılarını tek panelden düzenleyin." />
+      <PageHero eyebrow="Admin" title="İçerik ve Site Yönetimi" text="Görselleri, ana sayfa bloklarını ve proje rehberi blog yazılarını tek panelden düzenleyin." />
       <section className="content adminEditorShell">
         <aside className="adminSidebar">
           <div className="adminSessionBox">
@@ -2788,9 +2820,6 @@ function AdminPage({ model, errors, fetchedAt, siteContent, onContentSaved }) {
                   ["logoSvg", "Header logo SVG"],
                   ["logoPng", "Kart/promo logo PNG"],
                   ["heroImage", "Ana sayfa hero görseli"],
-                  ["leaderboardAdImage", "Yatay sponsor görseli"],
-                  ["sidebarAdImage", "Yan sponsor görseli"],
-                  ["adLink", "Sponsor bağlantısı"],
                 ].map(([key, label]) => (
                   <label key={key}>
                     {label}

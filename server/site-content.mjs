@@ -6,9 +6,6 @@ const DEFAULT_SITE_CONTENT = {
     logoSvg: "/logo.svg",
     logoPng: "/logo.png",
     heroImage: "",
-    leaderboardAdImage: "",
-    sidebarAdImage: "",
-    adLink: "",
   },
   home: {
     heroTitle: "Projenize uygun destek çağrısını bulun",
@@ -172,9 +169,6 @@ export function normalizeSiteContent(content = {}) {
       logoSvg: url(images.logoSvg) || DEFAULT_SITE_CONTENT.images.logoSvg,
       logoPng: url(images.logoPng) || DEFAULT_SITE_CONTENT.images.logoPng,
       heroImage: url(images.heroImage),
-      leaderboardAdImage: url(images.leaderboardAdImage),
-      sidebarAdImage: url(images.sidebarAdImage),
-      adLink: url(images.adLink),
     },
     home: {
       heroTitle: text(home.heroTitle, 180) || DEFAULT_SITE_CONTENT.home.heroTitle,

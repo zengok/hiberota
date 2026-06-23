@@ -1,0 +1,24 @@
+{
+  "name": "Hibe Rota",
+  "short_name": "Hibe Rota",
+  "description": "Hibe, fon, teşvik ve proje destek çağrılarını canlı kaynaklardan takip edin.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#081426",
+  "theme_color": "#081426",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "48x48",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo.svg",
+      "sizes": "48x48",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

@@ -71,20 +71,6 @@ const AUTOMATION_STATE_PATH = process.env.AUTOMATION_STATE_PATH || path.join(roo
 const MAX_URL_LENGTH = Number(process.env.MAX_URL_LENGTH || 2048);
 const MAX_JSON_BODY = process.env.MAX_JSON_BODY || "32kb";
 const MAX_SSE_CLIENTS = Number(process.env.MAX_SSE_CLIENTS || 100);
-const GOOGLE_ADS_SCRIPT_SRC = ["https://pagead2.googlesyndication.com"];
-const GOOGLE_ADS_CONNECT_SRC = [
-  "https://googleads.g.doubleclick.net",
-  "https://pagead2.googlesyndication.com",
-];
-const GOOGLE_ADS_FRAME_SRC = [
-  "https://googleads.g.doubleclick.net",
-  "https://tpc.googlesyndication.com",
-];
-const GOOGLE_ADS_IMG_SRC = [
-  "https://googleads.g.doubleclick.net",
-  "https://pagead2.googlesyndication.com",
-  "https://tpc.googlesyndication.com",
-];
 const SITE_CONTENT_PATH = process.env.SITE_CONTENT_PATH || path.join(root, ".hiberota", "site-content.json");
 
 const USER_AGENT =
@@ -195,14 +181,14 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        connectSrc: ["'self'", ...GOOGLE_ADS_CONNECT_SRC],
-        imgSrc: ["'self'", "data:", ...GOOGLE_ADS_IMG_SRC],
+        connectSrc: ["'self'"],
+        imgSrc: ["'self'", "data:"],
         scriptSrc: isProd
-          ? ["'self'", ...GOOGLE_ADS_SCRIPT_SRC]
-          : ["'self'", "'unsafe-inline'", "'unsafe-eval'", ...GOOGLE_ADS_SCRIPT_SRC],
+          ? ["'self'"]
+          : ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         fontSrc: ["'self'", "data:"],
-        frameSrc: GOOGLE_ADS_FRAME_SRC,
+        frameSrc: ["'self'"],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
         formAction: ["'self'"],
