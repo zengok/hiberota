@@ -11,7 +11,7 @@ export const SUBSCRIBER_STATUSES = {
   SUPPRESSED: "SUPPRESSED",
 };
 
-export const FREQUENCIES = new Set(["INSTANT", "DAILY", "WEEKLY"]);
+export const FREQUENCIES = new Set(["DAILY", "WEEKLY", "MONTHLY"]);
 
 export const INTERESTS = new Set([
   "Ulusal",
@@ -87,7 +87,7 @@ export function escapeHtml(value = "") {
 }
 
 export function buildPublicUrl(path = "/") {
-  const base = process.env.APP_PUBLIC_URL || "http://localhost:5173";
+  const base = process.env.APP_URL || process.env.APP_PUBLIC_URL || process.env.PUBLIC_BASE_URL || "http://localhost:5173";
   return new URL(path, base.endsWith("/") ? base : `${base}/`).toString();
 }
 

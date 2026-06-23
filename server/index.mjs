@@ -42,6 +42,7 @@ import {
   createCallPublishedOutbox,
   getSubscriptionRepository,
   resendConfirmation,
+  runNewsletterCron,
   subscribe,
   unsubscribeByToken,
   verifyWebhookSignature,
@@ -1322,12 +1323,28 @@ app.put("/api/v1/subscriptions/preferences", express.json({ limit: "12kb", stric
   });
 });
 
-app.post("/api/v1/email/webhooks/resend", express.raw({ type: "application/json", limit: "64kb" }), (req, res) => {
+app.post("/api/cron/newsletter", express.json({ limit: "8kb", strict: true }), async (req, res, next) => {
+  try {
+    const header = String(req.get("authorization") || "");
+    const token = header.replace(/^Bearer\s+/i, "") || String(req.body?.secret || "");
+    if (!process.env.CRON_SECRET || token !== process.env.CRON_SECRET) return res.status(401).json({ error: "unauthorized" });
+    const frequency = String(req.body?.frequency || req.query.frequency || "").toUpperCase();
+    const result = await runNewsletterCron(frequency);
+    res.status(result.status || 200).json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+function resendWebhookHandler(req, res) {
   if (!verifyWebhookSignature(req.body, req.headers)) return res.status(401).json({ error: "invalid_signature" });
   const payload = JSON.parse(req.body.toString("utf8"));
   const result = applyResendWebhook(payload);
   res.json(result);
-});
+}
+
+app.post("/api/v1/email/webhooks/resend", express.raw({ type: "application/json", limit: "64kb" }), resendWebhookHandler);
+app.post("/api/webhooks/resend", express.raw({ type: "application/json", limit: "64kb" }), resendWebhookHandler);
 
 app.get("/api/v1/admin/status", adminLimiter, (_req, res) => {
   res.json(adminSessionStatus());

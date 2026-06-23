@@ -21,9 +21,9 @@ const interests = [
 ];
 
 const frequencies = [
-  { value: "INSTANT", label: "Anında" },
   { value: "DAILY", label: "Günlük" },
   { value: "WEEKLY", label: "Haftalık" },
+  { value: "MONTHLY", label: "Aylık" },
 ];
 
 function canShow() {

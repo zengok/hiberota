@@ -8,6 +8,12 @@ services:
       HOST: 0.0.0.0
       PORT: 5173
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:?set ADMIN_API_TOKEN in .env}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-Hibe Rota <bildirim@hiberota.com>}
+      RESEND_REPLY_TO: ${RESEND_REPLY_TO:-destek@hiberota.com}
+      RESEND_WEBHOOK_SECRET: ${RESEND_WEBHOOK_SECRET:-}
+      CRON_SECRET: ${CRON_SECRET:?set CRON_SECRET in .env}
+      APP_URL: ${APP_URL:-https://hiberota.com}
       DATABASE_PATH: /app/.hiberota/database.sqlite
       REDIS_URL: redis://redis:6379
     volumes:

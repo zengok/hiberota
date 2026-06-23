@@ -121,6 +121,16 @@ export function createSubscriptionRepository(options = {}) {
       db.prepare("UPDATE email_notifications SET status = 'CANCELLED', updated_at = ? WHERE subscriber_id = ? AND status IN ('PENDING', 'QUEUED')").run(now, subscriberId);
       return this.findSubscriberById(subscriberId);
     },
+    updateResendContact(subscriberId, { contactId = "" } = {}) {
+      const now = new Date().toISOString();
+      db.prepare(`
+        UPDATE email_subscribers
+        SET resend_contact_id = COALESCE(NULLIF(?, ''), resend_contact_id),
+          last_resend_contact_synced_at = ?, updated_at = ?
+        WHERE id = ?
+      `).run(contactId, now, now, subscriberId);
+      return this.findSubscriberById(subscriberId);
+    },
     updatePreferences(subscriberId, { frequency, interests = [] }) {
       const tx = db.transaction(() => {
         db.prepare("UPDATE email_subscribers SET preferred_frequency = ?, updated_at = ? WHERE id = ?").run(frequency, new Date().toISOString(), subscriberId);
@@ -132,6 +142,24 @@ export function createSubscriptionRepository(options = {}) {
     },
     activeSubscribers() {
       return db.prepare("SELECT * FROM email_subscribers WHERE status = 'ACTIVE'").all().map((row) => ({ ...row, preferences: preferencesFor(row.id) }));
+    },
+    listPublishedCalls() {
+      return db.prepare(`
+        SELECT id, data, deadline, published_at, first_detected_at, updated_at
+        FROM calls
+        WHERE is_published = 1
+        ORDER BY deadline IS NULL, deadline ASC, updated_at DESC
+      `).all().map((row) => {
+        const call = parseJson(row.data, {});
+        return {
+          ...call,
+          id: call.id || row.id,
+          deadline: call.deadline || row.deadline,
+          publishedAt: call.publishedAt || row.published_at,
+          firstDetectedAt: call.firstDetectedAt || row.first_detected_at,
+          updatedAt: call.updatedAt || row.updated_at,
+        };
+      });
     },
     enqueueOutbox(eventType, aggregateId, payload, availableAt = new Date().toISOString()) {
       const outboxId = id("outbox");
@@ -151,6 +179,95 @@ export function createSubscriptionRepository(options = {}) {
     },
     enqueueDigest({ subscriberId, callId, period }) {
       db.prepare("INSERT OR IGNORE INTO email_digest_queue (id, subscriber_id, call_id, digest_period) VALUES (?, ?, ?, ?)").run(id("digest"), subscriberId, callId, period);
+    },
+    getDigestBatches(period, limit = 1000) {
+      const rows = db.prepare(`
+        SELECT dq.id AS digest_id, dq.subscriber_id, dq.call_id, s.email, s.status, s.preferred_frequency, s.resend_contact_id, c.data AS call_json
+        FROM email_digest_queue dq
+        JOIN email_subscribers s ON s.id = dq.subscriber_id
+        JOIN calls c ON c.id = dq.call_id
+        WHERE dq.digest_period = ? AND dq.processed_at IS NULL AND s.status = 'ACTIVE' AND s.preferred_frequency = ?
+        ORDER BY dq.created_at ASC
+        LIMIT ?
+      `).all(period, period, limit);
+      const batches = new Map();
+      for (const row of rows) {
+        if (!batches.has(row.subscriber_id)) {
+          batches.set(row.subscriber_id, {
+            subscriber: {
+              id: row.subscriber_id,
+              email: row.email,
+              status: row.status,
+              preferred_frequency: row.preferred_frequency,
+              resend_contact_id: row.resend_contact_id,
+              preferences: [],
+            },
+            calls: [],
+            digestIds: [],
+          });
+        }
+        const batch = batches.get(row.subscriber_id);
+        batch.digestIds.push(row.digest_id);
+        batch.calls.push(parseJson(row.call_json, { id: row.call_id }));
+      }
+      return [...batches.values()];
+    },
+    markDigestProcessed(digestIds = []) {
+      if (!digestIds.length) return 0;
+      const now = new Date().toISOString();
+      const stmt = db.prepare("UPDATE email_digest_queue SET processed_at = ? WHERE id = ? AND processed_at IS NULL");
+      const tx = db.transaction((ids) => ids.reduce((count, digestId) => count + stmt.run(now, digestId).changes, 0));
+      return tx(digestIds);
+    },
+    createNotificationForDigest({ subscriberId, type, periodStart, periodEnd, contentHash, providerMessageId = "", status = "SENT" }) {
+      const notificationId = id("notif");
+      const callId = `digest:${type}:${periodStart}:${periodEnd}:${contentHash}`;
+      const now = new Date().toISOString();
+      db.prepare(`
+        INSERT OR IGNORE INTO email_notifications (
+          id, subscriber_id, call_id, notification_type, provider, provider_message_id, status, sent_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, 'resend', ?, ?, ?, ?)
+      `).run(notificationId, subscriberId, callId, type, providerMessageId, status, now, now);
+      if (providerMessageId || status !== "PENDING") {
+        db.prepare(`
+          UPDATE email_notifications
+          SET provider = 'resend', provider_message_id = COALESCE(NULLIF(?, ''), provider_message_id),
+            status = ?, sent_at = COALESCE(sent_at, ?), updated_at = ?
+          WHERE subscriber_id = ? AND call_id = ? AND notification_type = ?
+        `).run(providerMessageId, status, now, now, subscriberId, callId, type);
+      }
+      return db.prepare("SELECT * FROM email_notifications WHERE subscriber_id = ? AND call_id = ? AND notification_type = ?").get(subscriberId, callId, type);
+    },
+    startNewsletterRun({ frequency, periodStart, periodEnd }) {
+      const runId = id("run");
+      db.prepare(`
+        INSERT OR IGNORE INTO newsletter_runs (id, frequency, period_start, period_end, status)
+        VALUES (?, ?, ?, ?, 'RUNNING')
+      `).run(runId, frequency, periodStart, periodEnd);
+      const run = db.prepare("SELECT * FROM newsletter_runs WHERE frequency = ? AND period_start = ? AND period_end = ?").get(frequency, periodStart, periodEnd);
+      if (run.id !== runId && run.status === "COMPLETED") return { run, acquired: false, reason: "already_completed" };
+      if (run.id !== runId && run.status === "RUNNING") return { run, acquired: false, reason: "already_running" };
+      if (run.id !== runId) return { run, acquired: false, reason: `already_${String(run.status || "started").toLowerCase()}` };
+      return { run, acquired: true };
+    },
+    completeNewsletterRun(runId, patch = {}) {
+      db.prepare(`
+        UPDATE newsletter_runs
+        SET status = ?, completed_at = ?, total_subscribers = ?, successful_sends = ?,
+          failed_sends = ?, skipped_sends = ?, error_summary = ?
+        WHERE id = ?
+      `).run(
+        patch.status || "COMPLETED",
+        new Date().toISOString(),
+        patch.totalSubscribers || 0,
+        patch.successfulSends || 0,
+        patch.failedSends || 0,
+        patch.skippedSends || 0,
+        patch.errorSummary || "",
+        runId,
+      );
+      return db.prepare("SELECT * FROM newsletter_runs WHERE id = ?").get(runId);
     },
     notificationExistsForCall(callId) {
       return Boolean(db.prepare("SELECT 1 FROM notification_outbox WHERE event_type = 'CALL_PUBLISHED' AND aggregate_id = ?").get(callId));

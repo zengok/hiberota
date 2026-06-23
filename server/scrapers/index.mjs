@@ -1,3 +1,5 @@
+import { createDevelopmentAgenciesScraper } from "./developmentAgencies.mjs";
+import { createEuFundingTendersScraper } from "./euFundingTenders.mjs";
 import { createEurekaScraper } from "./eureka.mjs";
 import { createEuresearchScraper, createEuroAccessScraper } from "./genericEurope.mjs";
 import { createGlobalDiscoveryScrapers } from "./globalDiscovery.mjs";
@@ -17,7 +19,9 @@ export function createScraperStrategies() {
     euroaccess: createEuroAccessScraper(),
     "hibeportali-cascade": createHibePortaliScraper(),
     "grants-gov": createGrantsGovScraper(),
+    "eu-funding-tenders": createEuFundingTendersScraper(),
     tuseb: createTusebScraper(),
+    "ka-development-agencies": createDevelopmentAgenciesScraper(),
     kosgeb: createKosgebScraper(),
     tkdk: createTkdkScraper(),
     "turkiye-ulusal-ajansi": createTurkiyeUlusalAjansiScraper(),

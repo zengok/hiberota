@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 import { createSubscriptionRepository } from "../server/email/subscription-repository.mjs";
+import { createSqliteAutomationRepository } from "../server/database/sqlite-repository.mjs";
 import {
   generateToken,
   hashToken,
@@ -18,7 +19,9 @@ import {
   createCallPublishedOutbox,
   isEmailEligibleCall,
   prepareNotificationsForCall,
+  runNewsletterCron,
   scheduleForFrequency,
+  selectNewsletterCalls,
   subscriberMatchesCall,
   unsubscribeByToken,
   verifyWebhookSignature,
@@ -28,6 +31,11 @@ import { buildVerificationEmail, createResendProvider } from "../server/email/pr
 function makeRepo() {
   const databasePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "hiberota-email-")), "database.sqlite");
   return createSubscriptionRepository({ databasePath });
+}
+
+function makeRepoWithPath() {
+  const databasePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "hiberota-email-")), "database.sqlite");
+  return { repo: createSubscriptionRepository({ databasePath }), databasePath };
 }
 
 function addSubscriber(repo, overrides = {}) {
@@ -94,7 +102,7 @@ test("matches subscriber preferences against call fields", () => {
 
 test("prevents duplicate call notification outbox and notification rows", () => {
   const repo = makeRepo();
-  const { subscriber } = addSubscriber(repo, { frequency: "INSTANT", interests: [] });
+  const { subscriber } = addSubscriber(repo, { frequency: "DAILY", interests: [] });
   repo.confirmSubscriber(subscriber.id);
   const call = {
     id: "call-a",
@@ -111,7 +119,7 @@ test("prevents duplicate call notification outbox and notification rows", () => 
   assert.equal(createCallPublishedOutbox(call, repo).created, false);
   prepareNotificationsForCall(call, repo);
   prepareNotificationsForCall(call, repo);
-  assert.equal(repo.listNotifications(10).length, 1);
+  assert.equal(repo.metrics().dailyDigestCount, 1);
   repo.close();
 });
 
@@ -119,10 +127,51 @@ test("digest scheduling and provider adapter are safe without API key", async ()
   const repo = makeRepo();
   const { subscriber, token } = addSubscriber(repo);
   assert.match(scheduleForFrequency("DAILY", new Date("2026-06-19T08:00:00+03:00")), /T06:00:00/);
-  assert.match(buildVerificationEmail({ subscriber, verificationToken: token }).html, /Aboneliği doğrula/);
+  assert.match(scheduleForFrequency("MONTHLY", new Date("2026-06-19T08:00:00+03:00")), /T06:00:00/);
+  assert.match(buildVerificationEmail({ subscriber, verificationToken: token }).html, /Aboneliğimi Onayla/);
   const provider = createResendProvider();
   const result = await provider.sendVerificationEmail({ subscriber, verificationToken: token });
   assert.equal(result.skipped, true);
+  repo.close();
+});
+
+test("newsletter cron selects published calls and records idempotent runs", async () => {
+  const { repo, databasePath } = makeRepoWithPath();
+  const automationRepo = createSqliteAutomationRepository({ databasePath });
+  const { subscriber } = addSubscriber(repo, { frequency: "MONTHLY", interests: [] });
+  repo.confirmSubscriber(subscriber.id);
+  automationRepo.saveState({
+    calls: {
+      "call-monthly": {
+        id: "call-monthly",
+        title: "Aylık destek çağrısı",
+        funder: "Hibe Rota Test",
+        status: "open",
+        isPublished: true,
+        confidenceScore: 95,
+        officialUrl: "https://example.com/monthly",
+        deadline: "2026-07-20T00:00:00.000Z",
+        firstDetectedAt: "2026-05-15T09:00:00.000Z",
+        publishedAt: "2026-05-15T09:00:00.000Z",
+        reviewStatus: "approved",
+      },
+    },
+  });
+  const now = new Date("2026-06-01T06:00:00.000Z");
+  const selected = selectNewsletterCalls("MONTHLY", now, repo);
+  assert.equal(selected.calls.length, 1);
+  const provider = {
+    async sendMonthlyDigest() {
+      return { id: "msg_monthly" };
+    },
+  };
+  const first = await runNewsletterCron("MONTHLY", { now, repo, provider });
+  assert.equal(first.ok, true);
+  assert.equal(first.run.status, "COMPLETED");
+  assert.equal(first.run.successful_sends, 1);
+  const second = await runNewsletterCron("MONTHLY", { now, repo, provider });
+  assert.equal(second.skipped, true);
+  automationRepo.close();
   repo.close();
 });
 

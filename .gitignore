@@ -1,5 +1,6 @@
 node_modules/
 dist/
 .hiberota/
+.env
 .DS_Store
 *.log

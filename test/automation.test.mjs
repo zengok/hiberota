@@ -21,6 +21,10 @@ import {
   parseImportantDates,
   updateSourceHealth,
 } from "../server/automation.mjs";
+import { createDevelopmentAgenciesScraper } from "../server/scrapers/developmentAgencies.mjs";
+import { createEuFundingTendersScraper } from "../server/scrapers/euFundingTenders.mjs";
+import { createScraperStrategies } from "../server/scrapers/index.mjs";
+import { createTusebScraper } from "../server/scrapers/tuseb.mjs";
 import { createKosgebScraper, createTkdkScraper, createTurkiyeUlusalAjansiScraper } from "../server/scrapers/turkishOfficial.mjs";
 
 function restoreEnv(name, value) {
@@ -268,6 +272,84 @@ test("new Turkish official scrapers extract application calls from fixture html"
   });
   assert.equal(uaItems.length, 1);
   assert.equal(uaItems[0].funder, "Türkiye Ulusal Ajansı");
+});
+
+test("development agencies scraper extracts current support cards", async () => {
+  const scraper = createDevelopmentAgenciesScraper();
+  const items = await scraper.extractListItems({
+    url: "https://ka.gov.tr/destekler",
+    html: `
+      <a class="item-card" href="https://api.ka.gov.tr/redirect/sample">
+        <div class="i-agency" title="Ankara Kalkınma Ajansı"><span class="i-agency-name">Ankara Kalkınma Ajansı</span></div>
+        <div class="item-description">2026 Yılı Sosyal Yenilik ve Sosyal Kalkınma Teknik Destek Programı</div>
+        <div class="item-date"><span>Teklif Teslimi Başlangıç Tarihi</span><div class="date-text">20 Şubat 2026</div></div>
+        <div class="item-date"><span>Teklif Teslimi Bitiş Tarihi</span><div class="date-text">30 Ekim 2026</div></div>
+      </a>
+    `,
+  });
+
+  assert.equal(items.length, 1);
+  assert.match(items[0].title, /Ankara Kalkınma Ajansı/);
+  assert.equal(items[0].deadline, "2026-10-30T00:00:00.000Z");
+});
+
+test("tuseb scraper extracts official call document links", async () => {
+  const scraper = createTusebScraper();
+  const items = await scraper.extractListItems({
+    url: "https://www.tuseb.gov.tr/haberler/2026-yili-tuseb-proje-desteklerine-iliskin-cagri-ayrintilari-yayimlandi-20260127",
+    html: `
+      <article>
+        <h1>2026 Yılı TÜSEB Proje Desteklerine İlişkin Çağrı Ayrıntıları Yayımlandı!</h1>
+        <p>Ön Başvuru için son tarih 30.09.2026'tir. Azami destek bütçesi ₺400.000,00.</p>
+        <a href="https://files.tuseb.gov.tr/tuseb/files/tbys/2026-c4.pdf">2026-C4 C GRUBU PROJE DESTEK PROGRAMI Ön Bilgi Formu</a>
+      </article>
+    `,
+  });
+
+  const call = items.find((item) => /2026-C4/.test(item.title));
+  assert.ok(call);
+  assert.equal(call.deadline, "2026-09-30T00:00:00.000Z");
+  assert.match(call.guideUrl, /2026-c4\.pdf/);
+});
+
+test("eu funding tenders scraper normalizes SEDIA open call results", async () => {
+  const scraper = createEuFundingTendersScraper();
+  const items = await scraper.extractListItems({
+    url: "https://api.tech.ec.europa.eu/search-api/prod/rest/search",
+    json: {
+      results: [
+        {
+          reference: "HORIZON-TEST-2026-01",
+          url: "https://ec.europa.eu/info/funding-tenders/opportunities/data/topicDetails/HORIZON-TEST-2026-01.json",
+          content: "Clean energy demonstration call",
+          summary: "Clean energy demonstration call",
+          metadata: {
+            status: ["31094502"],
+            identifier: ["HORIZON-TEST-2026-01"],
+            callIdentifier: ["HORIZON-TEST-2026"],
+            deadlineDate: ["2026-09-15T00:00:00.000+0000"],
+            startDate: ["2026-05-01T00:00:00.000+0000"],
+            descriptionByte: ["<p>Funding opportunity for clean energy.</p>"],
+            keywords: ["energy", "innovation"],
+          },
+        },
+      ],
+    },
+  });
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0].deadline, "2026-09-15T00:00:00.000Z");
+  assert.match(items[0].applicationUrl, /topic-details/);
+});
+
+test("active source registry has matching scraper strategies", () => {
+  const strategies = createScraperStrategies();
+  const missing = SOURCE_REGISTRY
+    .filter((source) => source.isActive)
+    .map((source) => source.id)
+    .filter((id) => !strategies[id]);
+
+  assert.deepEqual(missing, []);
 });
 
 test("mapWithConcurrency preserves result order", async () => {

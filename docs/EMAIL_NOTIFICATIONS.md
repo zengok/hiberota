@@ -7,10 +7,11 @@ Hibe Rota e-posta bildirimleri kullanıcı hesabı olmadan, yalnızca e-posta ad
 ```bash
 EMAIL_PROVIDER=resend
 RESEND_API_KEY=
-EMAIL_FROM_NAME=Hibe Rota
-EMAIL_FROM_ADDRESS=bildirim@bildirim.hiberota.com
-APP_PUBLIC_URL=https://hiberota.com
-EMAIL_WEBHOOK_SECRET=
+RESEND_FROM_EMAIL=Hibe Rota <bildirim@hiberota.com>
+RESEND_REPLY_TO=destek@hiberota.com
+RESEND_WEBHOOK_SECRET=
+CRON_SECRET=
+APP_URL=https://hiberota.com
 EMAIL_NOTIFICATION_ENABLED=true
 EMAIL_NOTIFICATION_CONFIDENCE_MIN=80
 TURNSTILE_SECRET_KEY=
@@ -22,13 +23,30 @@ API key yalnızca server ortamında tutulur. Frontend bundle'a eklenmez.
 
 1. Resend hesabında gönderim domainini ekleyin.
 2. DNS'e SPF, DKIM ve DMARC kayıtlarını girin.
-3. `EMAIL_FROM_ADDRESS` için doğrulanmış domain altında bir adres kullanın.
-4. Webhook URL'sini `POST /api/v1/email/webhooks/resend` olarak tanımlayın.
-5. Resend webhook secret değerini `EMAIL_WEBHOOK_SECRET` olarak kaydedin.
+3. `RESEND_FROM_EMAIL` için doğrulanmış domain altında `Hibe Rota <bildirim@hiberota.com>` adresini kullanın.
+4. Webhook URL'sini `POST /api/webhooks/resend` olarak tanımlayın. Eski `/api/v1/email/webhooks/resend` yolu da uyumluluk için çalışır.
+5. Resend webhook secret değerini `RESEND_WEBHOOK_SECRET` olarak kaydedin.
+
+## Cron
+
+Güvenli endpoint:
+
+```bash
+curl -X POST https://hiberota.com/api/cron/newsletter \
+  -H "Authorization: Bearer $CRON_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"frequency":"daily"}'
+```
+
+Zamanlama Europe/Istanbul saatine göre dış cron/systemd timer/VPS cron üzerinden yapılır:
+
+- Günlük: her gün 09:00, `frequency=daily`
+- Haftalık: her pazartesi 09:00, `frequency=weekly`
+- Aylık: her ayın 1. günü 09:00, `frequency=monthly`
 
 ## Worker
 
-E-posta işlemleri API request ve scraper içinde gönderilmez. API ve otomasyon yalnızca `notification_outbox`, `email_notifications` ve `email_digest_queue` kayıtları oluşturur. Üretimde Redis/BullMQ worker eklenebilir; mevcut geliştirme akışı SQLite outbox ile güvenli fallback sağlar.
+E-posta işlemleri scraper içinde gönderilmez. Cron endpointi gerçek `calls` tablosundan yayınlanmış, linki geçerli, kapanmamış çağrıları seçer; `newsletter_runs` ile aynı periyotta tekrar gönderimi engeller.
 
 ## KVKK and IYS
 
