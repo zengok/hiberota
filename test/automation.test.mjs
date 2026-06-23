@@ -2,18 +2,31 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   AutomationQueue,
+  FUNDING_INSTITUTIONS,
+  SOURCE_HEALTH_STATUSES,
+  SOURCE_REGISTRY,
+  SOURCE_VERIFICATION_STATUSES,
   buildLinkCheckCandidates,
   classifyPageType,
   computeStatus,
   contentHash,
+  createSourceAdapters,
   dedupeAndFlag,
   extractFundingDetails,
   isSafeCrawlerUrl,
+  mapWithConcurrency,
   mergeManualReviewQueue,
   matchFundingSource,
   normalizeCallRecord,
   parseImportantDates,
+  updateSourceHealth,
 } from "../server/automation.mjs";
+import { createKosgebScraper, createTkdkScraper, createTurkiyeUlusalAjansiScraper } from "../server/scrapers/turkishOfficial.mjs";
+
+function restoreEnv(name, value) {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
 
 test("parses Turkish and ISO deadline dates with time evidence", () => {
   const dates = parseImportantDates("Başvurular 30 Eylül 2026 saat 17.00’ye kadar alınacaktır.");
@@ -206,4 +219,115 @@ test("link check candidates are safe, deduped, and limit-aware", () => {
   ], { limit: 5 });
 
   assert.deepEqual(candidates.map((item) => item.type), ["official", "guide"]);
+});
+
+test("PDF-directed source registry separates sources from institutions", () => {
+  for (const id of ["kosgeb", "tkdk", "turkiye-ulusal-ajansi", "ka-development-agencies"]) {
+    const source = SOURCE_REGISTRY.find((item) => item.id === id);
+    assert.ok(source, `${id} source is registered`);
+    assert.ok(source.allowedDomains.length > 0);
+    assert.ok(source.institutionId);
+    assert.ok(source.sourceGroup);
+  }
+
+  const developmentAgencies = FUNDING_INSTITUTIONS.filter((item) => item.institutionType === "development-agency");
+  assert.equal(developmentAgencies.length, 26);
+});
+
+test("source health only becomes healthy after verified repeated successful crawls", () => {
+  const source = SOURCE_REGISTRY.find((item) => item.id === "kosgeb");
+  const state = { sources: { [source.id]: { ...source, successfulCrawlCount: 0 } }, sourceCrawlLogs: [] };
+  updateSourceHealth(state, source, { ok: true, found: 1, durationMs: 10 });
+  assert.equal(state.sources.kosgeb.healthStatus, SOURCE_HEALTH_STATUSES.DEGRADED);
+  updateSourceHealth(state, source, { ok: true, found: 1, durationMs: 10 });
+  assert.equal(state.sources.kosgeb.verificationStatus, SOURCE_VERIFICATION_STATUSES.VERIFIED);
+  assert.equal(state.sources.kosgeb.healthStatus, SOURCE_HEALTH_STATUSES.HEALTHY);
+});
+
+test("new Turkish official scrapers extract application calls from fixture html", async () => {
+  const kosgeb = createKosgebScraper();
+  const kosgebItems = await kosgeb.extractListItems({
+    url: "https://www.kosgeb.gov.tr/",
+    html: `<article><a href="/site/tr/genel/detay/9374/girisimci-destek-programi-is-gelistirme-cagrisi-2026-yili-2-donem-basvurulari-basladi">Girişimci Destek Programı İş Geliştirme Çağrısı 2026 Yılı 2. Dönem Başvuruları Başladı</a><p>Başvurular 20 Nisan - 8 Mayıs 2026 tarihleri arasında alınacak. 2 milyon TL destek.</p></article>`,
+  });
+  assert.equal(kosgebItems[0].funder, "KOSGEB");
+  assert.equal(kosgebItems[0].deadline, "2026-05-08T00:00:00.000Z");
+
+  const tkdk = createTkdkScraper();
+  const tkdkItems = await tkdk.extractListItems({
+    url: "https://www.tkdk.gov.tr/ProjeIslemleri/CagriIlanArsiv",
+    html: `<table><tr><td><a href="/Content/File/BasvuruFiles/CagriIlani.pdf">IPARD III 11.Başvuru Çağrı İlanı</a></td></tr><tr><td><a href="/duyuru/sonuclar">Başvuru Sonuçları Açıklandı</a></td></tr></table>`,
+  });
+  assert.equal(tkdkItems.length, 1);
+  assert.match(tkdkItems[0].programme, /IPARD/);
+
+  const ua = createTurkiyeUlusalAjansiScraper();
+  const uaItems = await ua.extractListItems({
+    url: "https://www.ua.gov.tr/anasayfa/icerikler/teklif-cagrilari-ve-rehberler/",
+    html: `<main><ul><li><a href="/anasayfa/icerikler/teklif-cagrilari-ve-rehberler/">2026 Erasmus+ Programı Teklif Çağrıları ve Rehberler</a> Erasmus+ hibe programı başvuruları için teklif çağrısı yayımlandı.</li></ul></main>`,
+  });
+  assert.equal(uaItems.length, 1);
+  assert.equal(uaItems[0].funder, "Türkiye Ulusal Ajansı");
+});
+
+test("mapWithConcurrency preserves result order", async () => {
+  const values = await mapWithConcurrency([3, 1, 2], 2, async (value) => {
+    await new Promise((resolve) => setTimeout(resolve, value));
+    return value * 10;
+  });
+
+  assert.deepEqual(values, [30, 10, 20]);
+});
+
+test("source adapters skip secondary detail scraping by default", async () => {
+  const previous = process.env.ENABLE_SECONDARY_DEEP_SCRAPING;
+  delete process.env.ENABLE_SECONDARY_DEEP_SCRAPING;
+  let detailFetches = 0;
+  const [adapter] = createSourceAdapters({
+    "hibeportali-cascade": {
+      discover: async () => ["https://example.com/page-1", "https://example.com/page-2"],
+      fetchListPage: async (url) => ({ url }),
+      extractListItems: async (page) => [
+        { id: "same", title: "Same call", deadline: "2099-01-01T00:00:00.000Z", url: `${page.url}/same` },
+      ],
+      fetchDetailPage: async (item) => {
+        detailFetches += 1;
+        return { url: item.url };
+      },
+      extractDetailData: async () => ({ description: "detail" }),
+    },
+  }).filter((item) => item.id === "hibeportali-cascade");
+
+  const items = await adapter.extractStructuredData();
+  restoreEnv("ENABLE_SECONDARY_DEEP_SCRAPING", previous);
+
+  assert.equal(items.length, 1);
+  assert.equal(detailFetches, 0);
+  assert.equal(items[0].description, undefined);
+});
+
+test("source adapters can opt in to secondary detail scraping", async () => {
+  const previous = process.env.ENABLE_SECONDARY_DEEP_SCRAPING;
+  process.env.ENABLE_SECONDARY_DEEP_SCRAPING = "true";
+  let detailFetches = 0;
+  const [adapter] = createSourceAdapters({
+    "hibeportali-cascade": {
+      discover: async () => ["https://example.com/page-1"],
+      fetchListPage: async (url) => ({ url }),
+      extractListItems: async () => [
+        { id: "call-a", title: "Call A", deadline: "2099-01-01T00:00:00.000Z", url: "https://example.com/a" },
+      ],
+      fetchDetailPage: async (item) => {
+        detailFetches += 1;
+        return { url: item.url };
+      },
+      extractDetailData: async () => ({ description: "detail" }),
+    },
+  }).filter((item) => item.id === "hibeportali-cascade");
+
+  const items = await adapter.extractStructuredData();
+  restoreEnv("ENABLE_SECONDARY_DEEP_SCRAPING", previous);
+
+  assert.equal(detailFetches, 1);
+  assert.equal(items[0].description, "detail");
 });

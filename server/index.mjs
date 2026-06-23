@@ -10,14 +10,16 @@ import morgan from "morgan";
 import rateLimit from "express-rate-limit";
 import "dotenv/config";
 import { assertProductionEnv } from "./config/env.mjs";
-import { adminAuth } from "./middleware/admin-auth.mjs";
+import { adminAuth, adminSessionStatus, authenticateAdminCredentials, buildAdminSession } from "./middleware/admin-auth.mjs";
 import { errorHandler } from "./middleware/error-handler.mjs";
 import { requestId } from "./middleware/request-id.mjs";
+import { createSiteContentStore } from "./site-content.mjs";
 import { dateMs, daysUntil, filterCalls, scopeFromParam, statusGroup } from "./services/call-filter-service.mjs";
 import { paginatedResponse, parsePositiveInt, sendJsonWithEtag } from "./utils/api-response.mjs";
 import { metricsMiddleware, metricsSnapshot, prometheusMetrics } from "./utils/metrics.mjs";
 import {
   AutomationQueue,
+  FUNDING_INSTITUTIONS,
   JOB_TYPES,
   SOURCE_REGISTRY,
   buildLinkCheckCandidates,
@@ -83,9 +85,11 @@ const GOOGLE_ADS_IMG_SRC = [
   "https://pagead2.googlesyndication.com",
   "https://tpc.googlesyndication.com",
 ];
+const SITE_CONTENT_PATH = process.env.SITE_CONTENT_PATH || path.join(root, ".hiberota", "site-content.json");
 
 const USER_AGENT =
   process.env.SOURCE_USER_AGENT || "Hiberota/1.0 (+project-call-monitor; contact: admin@example.com)";
+const siteContentStore = createSiteContentStore(SITE_CONTENT_PATH);
 
 let callCache = null;
 let callCachePromise = null;
@@ -246,13 +250,13 @@ const NON_APPLICATION_PATTERNS = [
   /kazanan(?:lar)?/i,
   /finalist(?:ler)?/i,
   /(?:^|\s)[öo]d[üu]l(?:\s|$|ler|leri|[üu])/i,
-  /etkinlik/i,
-  /e[ğg]itim/i,
   /webinar/i,
 ];
 
 const APPLICATION_SIGNAL_PATTERNS = [
   /son\s+ba[şs]vuru/i,
+  /ba[şs]vuru\s+[çc]a[ğg]r[ıi]\s+ilan[ıi]/i,
+  /teklif\s+[çc]a[ğg]r[ıi](?:lar[ıi])?/i,
   /ba[şs]vur(?:u|ular)\s+(?:a[çc][ıi]ld[ıi]|al[ıi]nacak|ba[şs]lad[ıi]|devam\s+ediyor)/i,
   /ba[şs]vuruya\s+a[çc][ıi](?:k|ld[ıi])/i,
   /[çc]a[ğg]r[ıi](?:s[ıi])?\s+(?:a[çc][ıi]ld[ıi]|yay[ıi]mland[ıi]|duyuruldu)/i,
@@ -361,8 +365,8 @@ function extractMoney(text) {
 
 function classifyScope(source, title = "") {
   const value = `${source} ${title}`.toLocaleLowerCase("tr-TR");
-  if (value.includes("tübitak") || value.includes("tuseb") || value.includes("kosgeb")) return "Ulusal";
-  if (value.includes("ufuk") || value.includes("horizon") || value.includes("eureka") || value.includes("euro")) return "Avrupa";
+  if (value.includes("tübitak") || value.includes("tuseb") || value.includes("kosgeb") || value.includes("tkdk") || value.includes("ipard")) return "Ulusal";
+  if (value.includes("ulusal ajans") || value.includes("erasmus") || value.includes("dayanışma") || value.includes("ufuk") || value.includes("horizon") || value.includes("eureka") || value.includes("euro")) return "Avrupa";
   return "Yurtdışı";
 }
 
@@ -1064,6 +1068,11 @@ app.get("/api/calls/:slug/similar", async (req, res) => {
   res.json({ calls: similarPublicCalls(call, payload.calls) });
 });
 
+app.get("/api/v1/site-content", (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.json({ content: siteContentStore.read() });
+});
+
 let sseClients = [];
 app.get("/api/v1/stream", (req, res) => {
   if (sseClients.length >= MAX_SSE_CLIENTS) return res.status(429).json({ error: "too_many_stream_clients" });
@@ -1169,7 +1178,32 @@ app.get("/api/v1/funders", async (_req, res) => {
 
 app.get("/api/institutions", async (_req, res) => {
   const payload = await getCachedCalls();
-  const institutions = [...new Set(payload.calls.map((call) => call.institution || call.funder).filter(Boolean))].sort();
+  const callCounts = payload.calls.reduce((counts, call) => {
+    const key = call.fundingSourceId || slug(call.institution || call.funder || "");
+    if (key) counts[key] = (counts[key] || 0) + 1;
+    return counts;
+  }, {});
+  const institutions = FUNDING_INSTITUTIONS
+    .filter((institution) => institution.active)
+    .map((institution) => ({
+      ...institution,
+      callCount: callCounts[institution.id] || 0,
+    }))
+    .sort((a, b) => a.nameTr.localeCompare(b.nameTr, "tr"));
+  res.json({ institutions });
+});
+
+app.get("/api/v1/institutions", async (_req, res) => {
+  const payload = await getCachedCalls();
+  const callCounts = payload.calls.reduce((counts, call) => {
+    const key = call.fundingSourceId || slug(call.institution || call.funder || "");
+    if (key) counts[key] = (counts[key] || 0) + 1;
+    return counts;
+  }, {});
+  const institutions = FUNDING_INSTITUTIONS
+    .filter((institution) => institution.active)
+    .map((institution) => ({ ...institution, callCount: callCounts[institution.id] || 0 }))
+    .sort((a, b) => a.nameTr.localeCompare(b.nameTr, "tr"));
   res.json({ institutions });
 });
 
@@ -1309,6 +1343,21 @@ app.post("/api/v1/email/webhooks/resend", express.raw({ type: "application/json"
   res.json(result);
 });
 
+app.get("/api/v1/admin/status", adminLimiter, (_req, res) => {
+  res.json(adminSessionStatus());
+});
+
+app.post("/api/v1/admin/login", adminLimiter, express.json({ limit: "4kb", strict: true }), (req, res) => {
+  const admin = authenticateAdminCredentials(req.body?.username || "", req.body?.password || "");
+  if (!admin) return res.status(401).json({ error: "invalid_admin_credentials" });
+  const session = buildAdminSession(admin.username);
+  res.json({ ...session, username: admin.username });
+});
+
+app.get("/api/v1/admin/session", adminLimiter, adminAuth, (req, res) => {
+  res.json({ authenticated: true, username: req.admin?.username || "token-admin", expiresAt: req.admin?.expiresAt || null });
+});
+
 app.get("/api/v1/admin/email/metrics", adminLimiter, adminAuth, (_req, res) => {
   res.json({ metrics: getSubscriptionRepository().metrics() });
 });
@@ -1334,6 +1383,10 @@ app.post("/api/v1/admin/email/subscribers/:id/suppress", adminLimiter, adminAuth
   const subscriber = getSubscriptionRepository().suppressSubscriber(req.params.id, status);
   if (!subscriber) return res.status(404).json({ error: "subscriber_not_found" });
   res.json({ status: "suppressed", subscriber: { ...subscriber, email: maskEmail(subscriber.email) } });
+});
+
+app.put("/api/v1/admin/site-content", adminLimiter, adminAuth, express.json({ limit: "96kb", strict: true }), (req, res) => {
+  res.json({ content: siteContentStore.write(req.body?.content || req.body || {}) });
 });
 
 app.post("/api/v1/automation/manual-review/:id/:action", adminLimiter, adminAuth, express.json({ limit: MAX_JSON_BODY, strict: true }), async (req, res) => {

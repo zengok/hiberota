@@ -107,6 +107,7 @@ const audiences = [
   { label: "Kurumsal", query: "kamu", icon: Landmark },
 ];
 const SURVEY_SEEN_KEY = "hiberota:grant-survey-seen:v1";
+const ADMIN_TOKEN_STORAGE_KEY = "hiberota:admin-session-token";
 const surveyInitialState = {
   userType: "student",
   academicLevel: "Undergraduate Students",
@@ -143,6 +144,25 @@ const surveyScopes = [
   { value: "europe", label: "Avrupa", destination: "Europe" },
   { value: "international", label: "Uluslararası", destination: "Global" },
 ];
+const defaultCallFilters = {
+  query: "",
+  scope: "Tümü",
+  status: "open",
+  category: "",
+  funder: "",
+  targetGroup: "",
+  keyword: "",
+  thematicArea: "",
+  country: "",
+  currency: "",
+  budgetMin: "",
+  budgetMax: "",
+  deadlineWithin: "",
+  deadlineFrom: "",
+  deadlineTo: "",
+  officialOnly: false,
+  sort: "deadline_asc",
+};
 const guideCards = [
   {
     slug: "etkili-proje-ozeti-nasil-yazilir",
@@ -229,6 +249,42 @@ const guideCards = [
     ],
   },
 ];
+const sectorChips = [
+  { label: "Tarım", query: "Tarım", icon: Leaf },
+  { label: "Bilişim", query: "Bilişim", icon: Database },
+  { label: "Enerji", query: "Enerji", icon: Sparkles },
+  { label: "Sağlık", query: "Sağlık", icon: Heart },
+  { label: "İmalat", query: "İmalat", icon: Building2 },
+  { label: "Akademi", query: "Akademi", icon: GraduationCap },
+];
+
+const defaultSiteContent = {
+  images: {
+    logoSvg: "/logo.svg",
+    logoPng: "/logo.png",
+    heroImage: "",
+    leaderboardAdImage: "",
+    sidebarAdImage: "",
+    adLink: "",
+  },
+  home: {
+    heroTitle: "Projenize uygun destek çağrısını bulun",
+    heroText: "Ulusal ve uluslararası binlerce hibe, fon ve destek programını tek noktadan keşfedin. İhtiyacınız olan finansmana en kısa yoldan ulaşın.",
+    promoTitle: "Doğru hibeyi daha hızlı yakalayın.",
+    promoText: "Canlı kaynaklar taranır, açık çağrılar tek listede toplanır ve kritik son tarihler öne çıkarılır.",
+  },
+  guide: {
+    heroTitle: "Proje Başvuru Rehberi",
+    heroText: "Araştırma ve yenilik projelerinizi başarıyla hazırlamak, bütçelendirmek ve yönetmek için kapsamlı bilgi merkezi.",
+    categories: ["Tüm Kategoriler", "Çağrı Okuma", "Proje Yazımı", "Bütçe Hazırlama", "Ortaklık Kurma", "Değerlendirme Süreci"],
+    glossary: [
+      { term: "Ar-Ge", definition: "Bilgi dağarcığını artırmak için yürütülen sistematik yaratıcı çalışmalar." },
+      { term: "TRL", definition: "Teknolojinin olgunluğunu 1 ile 9 arasında değerlendiren seviye sistemi." },
+      { term: "Hibe / Eş Finansman", definition: "Proje maliyetinin bir kısmının fon sağlayıcı tarafından karşılanması." },
+    ],
+    articles: guideCards,
+  },
+};
 const searchSynonyms = {
   tubitak: ["tübitak", "tubitak", "1001", "1003", "1501", "1507", "1512", "teydeb"],
   "tübitak": ["tübitak", "tubitak", "1001", "1003", "1501", "1507", "1512", "teydeb"],
@@ -250,7 +306,62 @@ const searchSynonyms = {
   kosgeb: ["kosgeb"],
   yesil: ["yesil", "yeşil", "green", "climate", "iklim", "sustainability", "sürdürülebilir", "enerji"],
   "yeşil": ["yesil", "yeşil", "green", "climate", "iklim", "sustainability", "sürdürülebilir", "enerji"],
+  biomarker: ["biomarker", "biyobelirteç", "clinical", "klinik", "health", "sağlık"],
+  clinical: ["clinical", "klinik", "health", "sağlık", "medical", "tıbbi"],
+  youth: ["youth", "gençlik", "genç", "children", "çocuk"],
+  violence: ["violence", "şiddet", "suicide", "intihar", "prevention", "önleme"],
+  naval: ["naval", "defense", "savunma", "warfare", "aircraft"],
 };
+const keywordPatterns = [
+  {
+    value: "digital-ai",
+    label: "Dijital dönüşüm ve yapay zeka",
+    hint: "AI, veri, siber güvenlik, yazılım, ağ teknolojileri",
+    terms: ["yapay zeka", "artificial intelligence", "machine learning", "makine öğrenmesi", "digital", "dijital", "data", "veri", "security", "cyber", "siber", "network", "software", "technology", "technologies"],
+  },
+  {
+    value: "health-clinical",
+    label: "Sağlık ve klinik araştırma",
+    hint: "Sağlık, biyoteknoloji, klinik çalışma, biyobelirteç",
+    terms: ["sağlık", "saglik", "health", "clinical", "klinik", "medical", "biomedical", "biyomedikal", "biomarker", "biyobelirteç", "biotechnology", "biyoteknoloji", "patient", "hastane"],
+  },
+  {
+    value: "energy-climate",
+    label: "Enerji, iklim ve çevre",
+    hint: "Enerji, iklim, yeşil dönüşüm, sürdürülebilirlik",
+    terms: ["enerji", "energy", "climate", "iklim", "green", "yeşil", "sustainability", "sürdürülebilir", "environment", "çevre", "carbon", "karbon", "clean", "temiz"],
+  },
+  {
+    value: "sme-innovation",
+    label: "KOBİ, girişim ve inovasyon",
+    hint: "KOBİ, startup, şirket, ticarileşme, yatırım",
+    terms: ["kobi", "sme", "startup", "girişim", "girisim", "company", "şirket", "sirket", "innovation", "inovasyon", "commercial", "ticarileşme", "yatırım", "investment"],
+  },
+  {
+    value: "agriculture-food",
+    label: "Tarım, gıda ve kırsal kalkınma",
+    hint: "Tarım, gıda, kırsal destek, üretici ve kooperatif",
+    terms: ["tarım", "tarim", "agriculture", "food", "gıda", "gida", "rural", "kırsal", "kirsal", "farmer", "çiftçi", "ciftci", "cooperative", "kooperatif"],
+  },
+  {
+    value: "education-youth",
+    label: "Eğitim, gençlik ve sosyal etki",
+    hint: "Eğitim, gençlik, çocuk, şiddet önleme, sosyal programlar",
+    terms: ["eğitim", "egitim", "education", "school", "okul", "student", "öğrenci", "ogrenci", "youth", "genç", "genc", "children", "çocuk", "cocuk", "violence", "şiddet", "siddet", "suicide", "intihar", "social", "sosyal"],
+  },
+  {
+    value: "public-civil",
+    label: "Kamu, STK ve yerel yönetim",
+    hint: "Belediye, kamu, STK, vakıf, yerel aktörler",
+    terms: ["kamu", "public", "belediye", "municipality", "stk", "ngo", "nonprofit", "dernek", "vakıf", "vakif", "local", "yerel", "civil", "civic"],
+  },
+  {
+    value: "research-partnership",
+    label: "Akademik araştırma ve ortaklık",
+    hint: "Üniversite, konsorsiyum, araştırmacı, ortak proje",
+    terms: ["akadem", "üniversite", "universite", "university", "researcher", "araştırmacı", "arastirmaci", "partnership", "ortaklık", "ortaklik", "consortium", "konsorsiyum", "doctoral", "doktora", "postdoc"],
+  },
+];
 
 function formatDate(value) {
   if (!value) return "Tarih bekleniyor";
@@ -281,19 +392,47 @@ function tokenizeSearch(value = "") {
   return normalizeSearch(value).split(" ").filter(Boolean);
 }
 
-function callKeywords(call) {
-  const base = [
+function keywordTextFields(call) {
+  return [
     call.title,
     call.funder,
+    call.institution,
     call.category,
+    call.programme,
+    call.thematicArea,
+    call.supportType,
+    call.support,
     call.summary,
     call.source,
-    call.scope,
-    scopeLabel(call.scope),
     call.externalId,
-    targetAudience(call),
-  ];
-  const joined = normalizeSearch(base.filter(Boolean).join(" "));
+    call.callCode,
+    ...(call.categories || []),
+    ...(call.eligibleCountries || []),
+    ...(call.eligibleInstitutions || []),
+    ...targetGroups(call),
+  ].filter(Boolean);
+}
+
+function keywordOptionFields(call) {
+  return [
+    call.title,
+    call.category,
+    call.programme,
+    call.thematicArea,
+    call.supportType,
+    call.support,
+    call.summary,
+    ...(call.categories || []),
+    ...(call.eligibleInstitutions || []),
+  ].filter(Boolean);
+}
+
+function keywordOptionSearchText(call) {
+  return normalizeSearch(keywordOptionFields(call).join(" "));
+}
+
+function callKeywords(call) {
+  const joined = normalizeSearch([...keywordTextFields(call), call.scope, scopeLabel(call.scope)].filter(Boolean).join(" "));
   const tokens = new Set(joined.split(" ").filter(Boolean));
   if (call.scope === "Ulusal") ["ulusal", "turkiye"].forEach((token) => tokens.add(token));
   if (call.scope === "Avrupa") ["avrupa", "ab", "eu", "europe", "horizon", "ufuk"].forEach((token) => tokens.add(token));
@@ -304,6 +443,35 @@ function callKeywords(call) {
   if (/horizon|ufuk|eureka|euro/i.test(`${call.funder} ${call.source} ${call.title}`)) ["avrupa", "ab", "eu", "horizon", "ufuk", "eureka"].forEach((token) => tokens.add(token));
   if (/grants/i.test(`${call.funder} ${call.source}`)) ["uluslararasi", "yurtdisi", "abd", "usa", "grantsgov"].forEach((token) => tokens.add(token));
   return [...tokens].join(" ");
+}
+
+function keywordMatchesCall(call, keyword) {
+  const pattern = keywordPatterns.find((item) => item.value === keyword || item.label === keyword);
+  if (pattern) return keywordPatternMatchesCall(call, pattern);
+  const terms = tokenizeSearch(keyword);
+  const haystack = keywordOptionSearchText(call);
+  return terms.length > 0 && terms.every((term) => haystack.includes(term));
+}
+
+function keywordPatternMatchesCall(call, pattern) {
+  const haystack = keywordOptionSearchText(call);
+  return pattern.terms.some((term) => {
+    const tokens = tokenizeSearch(term);
+    return tokens.length > 0 && tokens.every((token) => haystack.includes(token));
+  });
+}
+
+function keywordLabel(value) {
+  return keywordPatterns.find((item) => item.value === value || item.label === value)?.label || value;
+}
+
+function buildKeywordOptions(calls) {
+  return keywordPatterns
+    .map((pattern) => ({
+      ...pattern,
+      count: calls.filter((call) => keywordPatternMatchesCall(call, pattern)).length,
+    }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "tr"));
 }
 
 function expandedSearchTerms(query) {
@@ -340,6 +508,23 @@ function matchesSearch(call, groups) {
   if (!groups.length) return true;
   const haystack = call.searchIndex || callKeywords(call);
   return groups.every((group) => group.some((term) => haystack.includes(term)));
+}
+
+function normalizedIncludes(value, query) {
+  if (!query) return true;
+  return normalizeSearch(value).includes(normalizeSearch(query));
+}
+
+function callBudgetRange(call) {
+  const min = Number(call.budgetMin ?? call.budgetMax ?? 0) || null;
+  const max = Number(call.budgetMax ?? call.budgetMin ?? 0) || null;
+  return { min, max };
+}
+
+function isOfficialCall(call) {
+  if (call.isOfficial === true || call.sourceType === "official") return true;
+  if (call.officialUrl && call.url && call.officialUrl === call.url) return true;
+  return call.reviewStatus === "approved" && (call.confidenceScore || 0) >= 80;
 }
 
 function formatDateTime(value) {
@@ -389,6 +574,10 @@ function statusLabel(value) {
     RESULT_PUBLISHED: "Sonuç Yayında",
     UNKNOWN: "Kontrol Ediliyor",
   }[value] || value;
+}
+
+function booleanFilterParam(value) {
+  return ["1", "true", "yes", "evet"].includes(String(value || "").toLocaleLowerCase("tr-TR"));
 }
 
 function confidenceLabel(value) {
@@ -597,6 +786,40 @@ function useCalls() {
   return { ...state, refresh };
 }
 
+function mergeSiteContent(content = {}) {
+  return {
+    images: { ...defaultSiteContent.images, ...(content.images || {}) },
+    home: { ...defaultSiteContent.home, ...(content.home || {}) },
+    guide: {
+      ...defaultSiteContent.guide,
+      ...(content.guide || {}),
+      categories: content.guide?.categories?.length ? content.guide.categories : defaultSiteContent.guide.categories,
+      glossary: content.guide?.glossary?.length ? content.guide.glossary : defaultSiteContent.guide.glossary,
+      articles: content.guide?.articles?.length ? content.guide.articles : defaultSiteContent.guide.articles,
+    },
+  };
+}
+
+function useSiteContent() {
+  const [state, setState] = useState({ content: defaultSiteContent, loading: true, error: "" });
+  const refresh = useCallback(async () => {
+    try {
+      const response = await fetch("/api/v1/site-content");
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload?.error || "İçerik alınamadı.");
+      setState({ content: mergeSiteContent(payload.content), loading: false, error: "" });
+    } catch (error) {
+      setState({ content: defaultSiteContent, loading: false, error: error.message || "İçerik alınamadı." });
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  return { ...state, refresh };
+}
+
 function usePageMeta(title, description) {
   useEffect(() => {
     document.title = title;
@@ -628,14 +851,30 @@ function usePageMeta(title, description) {
 function filterCalls(calls, filters) {
   const groups = searchGroups(filters.query);
   const deadlineLimit = filters.deadlineWithin ? Number(filters.deadlineWithin) : null;
+  const budgetMin = filters.budgetMin ? Number(filters.budgetMin) : null;
+  const budgetMax = filters.budgetMax ? Number(filters.budgetMax) : null;
   return calls.filter((call) => {
     const left = daysLeft(call.deadline);
+    const deadlineMs = call.deadline ? new Date(call.deadline).getTime() : null;
+    const deadlineFrom = filters.deadlineFrom ? new Date(filters.deadlineFrom).getTime() : null;
+    const deadlineTo = filters.deadlineTo ? new Date(filters.deadlineTo).getTime() : null;
+    const budget = callBudgetRange(call);
     return (
       matchesSearch(call, groups) &&
+      (!filters.keyword || keywordMatchesCall(call, filters.keyword)) &&
       (filters.scope === "Tümü" || call.scope === filters.scope) &&
       (filters.status === "all" || callStatusGroup(call) === filters.status) &&
       matchesCategory(call, filters.category) &&
       (!filters.funder || call.funder === filters.funder) &&
+      (!filters.targetGroup || targetGroups(call).some((group) => normalizedIncludes(group, filters.targetGroup))) &&
+      (!filters.thematicArea || callThemes(call).some((theme) => normalizedIncludes(theme, filters.thematicArea)) || matchesSearch(call, searchGroups(filters.thematicArea))) &&
+      (!filters.country || call.country === filters.country || (call.eligibleCountries || []).includes(filters.country)) &&
+      (!filters.currency || call.currency === filters.currency) &&
+      (!budgetMin || (budget.max && budget.max >= budgetMin)) &&
+      (!budgetMax || (budget.min && budget.min <= budgetMax)) &&
+      (!deadlineFrom || (deadlineMs && deadlineMs >= deadlineFrom)) &&
+      (!deadlineTo || (deadlineMs && deadlineMs <= deadlineTo)) &&
+      (!filters.officialOnly || isOfficialCall(call)) &&
       (!deadlineLimit || (left !== null && left >= 0 && left <= deadlineLimit))
     );
   }).sort((a, b) => {
@@ -665,7 +904,12 @@ function SectionTitle({ eyebrow, title, text }) {
   );
 }
 
-function Header({ route }) {
+function SiteAd({ siteContent, size = "leaderboard" }) {
+  const image = size === "sidebar" ? siteContent.images.sidebarAdImage : siteContent.images.leaderboardAdImage;
+  return <AdBanner type="custom" size={size} image={image} link={siteContent.images.adLink || "#"} />;
+}
+
+function Header({ route, siteContent }) {
   const [open, setOpen] = useState(false);
   const active = (href) => href === "/" ? route.pathname === "/" : route.pathname.startsWith(href);
   return (
@@ -674,7 +918,7 @@ function Header({ route }) {
         event.preventDefault();
         navigate("/");
       }} aria-label="Hibe Rota ana sayfa">
-        <img className="brandLogo" src="/logo.svg" alt="" aria-hidden="true" />
+        <img className="brandLogo" src={siteContent.images.logoSvg || "/logo.svg"} alt="" aria-hidden="true" />
         <strong>Hibe Rota</strong>
       </a>
       <nav>
@@ -816,6 +1060,9 @@ function CallCard({ call, selected, onSelect, mode = "expand" }) {
   const asDetail = mode === "link";
   const closed = isClosedCall(call);
   const statusTone = closed ? "closed" : callStatusGroup(call) === "upcoming" ? "upcoming" : "open";
+  const audienceChips = audienceChipLabels(call);
+  const visibleAudienceChips = audienceChips.slice(0, 4);
+  const hiddenAudienceCount = Math.max(0, audienceChips.length - visibleAudienceChips.length);
   const openDetail = (event) => {
     event.stopPropagation();
     navigate(callPath(call));
@@ -855,6 +1102,13 @@ function CallCard({ call, selected, onSelect, mode = "expand" }) {
         <FavoriteButton callId={call.id} className="cardFavorite" label="Favori" />
       </div>
       <h3>{cleanHtml(call.title)}</h3>
+      <div className="cardAudience" aria-label={`Kimler başvurabilir: ${audienceChips.join(", ")}`}>
+        <span className="cardAudienceLabel"><Users size={14} /> Kimler başvurabilir?</span>
+        <div className="cardAudienceChips">
+          {visibleAudienceChips.map((label) => <span key={label}>{label}</span>)}
+          {hiddenAudienceCount > 0 && <span>+{hiddenAudienceCount}</span>}
+        </div>
+      </div>
       <p>{cleanHtml(call.summary || call.category)}</p>
       <div className="cardMetaLine">
         <span>{call.funder}</span>
@@ -886,7 +1140,23 @@ function CallCard({ call, selected, onSelect, mode = "expand" }) {
   );
 }
 
-function FilterPanel({ calls, filters, setFilters, categories, funders, refresh, loading, fetchedAt, lockedScope }) {
+function FilterPanel({
+  calls,
+  filters,
+  setFilters,
+  categories,
+  funders,
+  targetGroupOptions,
+  keywordOptions,
+  themeOptions,
+  countryOptions,
+  currencyOptions,
+  refresh,
+  loading,
+  fetchedAt,
+  lockedScope,
+  resultCount,
+}) {
   const update = (key, value) => setFilters((current) => {
     const next = { ...current, [key]: value };
     if (key === "funder" && !lockedScope) {
@@ -900,16 +1170,29 @@ function FilterPanel({ calls, filters, setFilters, categories, funders, refresh,
   return (
     <aside className="filterPanel" aria-label="Çağrı filtreleri">
       <div className="filterHeader">
-        <h2>Filtreler</h2>
-        <button type="button" onClick={() => setFilters((current) => ({ ...current, query: "", scope: lockedScope || "Tümü", status: "open", category: "", funder: "", deadlineWithin: "", sort: "deadline_asc" }))}>Temizle</button>
+        <div>
+          <h2>Filtreler</h2>
+          <p>{resultCount} uygun çağrı</p>
+        </div>
+        <button type="button" onClick={() => setFilters((current) => ({ ...current, ...defaultCallFilters, scope: lockedScope || "Tümü" }))}>Temizle</button>
       </div>
       <label className="fieldLabel">
         <span>Arama</span>
         <span className="inlineSearch">
           <Search size={20} />
-          <input value={filters.query} onChange={(event) => update("query", event.target.value)} placeholder="Anahtar kelime ile ara" />
+          <input value={filters.query} onChange={(event) => update("query", event.target.value)} placeholder="Kurum, program veya proje alanı ara" />
         </span>
       </label>
+      <span className="filterGroupTitle">Otomasyon anahtar kelimeleri</span>
+      <div className="keywordPatternGrid" aria-label="Otomasyon anahtar kelime kalıpları">
+        {keywordOptions.map((item) => (
+          <button key={item.value} type="button" className={`${filters.keyword === item.value ? "active" : ""} ${item.count === 0 ? "empty" : ""}`} onClick={() => update("keyword", filters.keyword === item.value ? "" : item.value)}>
+            <strong>{item.label}</strong>
+            <span>{item.hint}</span>
+            <em>{item.count} çağrı</em>
+          </button>
+        ))}
+      </div>
       <span className="filterGroupTitle">Kapsam</span>
       <div className="segmentGroup" aria-label="Çağrı türü filtresi">
         {filterTabs.map((tab) => (
@@ -919,6 +1202,7 @@ function FilterPanel({ calls, filters, setFilters, categories, funders, refresh,
           </button>
         ))}
       </div>
+      <span className="filterGroupTitle">Uygunluk</span>
       <div className="selectGrid">
         <label>
           <span>Durum</span>
@@ -927,6 +1211,20 @@ function FilterPanel({ calls, filters, setFilters, categories, funders, refresh,
             <option value="upcoming">Yakında</option>
             <option value="closed">Kapandı</option>
             <option value="all">Tümü</option>
+          </select>
+        </label>
+        <label>
+          <span>Hedef kitle</span>
+          <select value={filters.targetGroup} onChange={(event) => update("targetGroup", event.target.value)}>
+            <option value="">Tüm başvuru sahipleri</option>
+            {targetGroupOptions.map((group) => <option key={group} value={group}>{group}</option>)}
+          </select>
+        </label>
+        <label>
+          <span>Alan / tema</span>
+          <select value={filters.thematicArea} onChange={(event) => update("thematicArea", event.target.value)}>
+            <option value="">Tüm alanlar</option>
+            {themeOptions.map((theme) => <option key={theme} value={theme}>{theme}</option>)}
           </select>
         </label>
         <label>
@@ -944,12 +1242,46 @@ function FilterPanel({ calls, filters, setFilters, categories, funders, refresh,
           </select>
         </label>
         <label>
+          <span>Uygun ülke</span>
+          <select value={filters.country} onChange={(event) => update("country", event.target.value)}>
+            <option value="">Tüm ülkeler</option>
+            {countryOptions.map((country) => <option key={country} value={country}>{country}</option>)}
+          </select>
+        </label>
+      </div>
+      <span className="filterGroupTitle">Zaman ve bütçe</span>
+      <div className="selectGrid">
+        <label>
           <span>Son tarih</span>
           <select value={filters.deadlineWithin} onChange={(event) => update("deadlineWithin", event.target.value)}>
             <option value="">Tüm tarihler</option>
             <option value="7">7 gün içinde</option>
             <option value="30">30 gün içinde</option>
             <option value="45">45 gün içinde</option>
+            <option value="90">90 gün içinde</option>
+          </select>
+        </label>
+        <label>
+          <span>Başlangıç tarihi</span>
+          <input type="date" value={filters.deadlineFrom} onChange={(event) => update("deadlineFrom", event.target.value)} />
+        </label>
+        <label>
+          <span>Bitiş tarihi</span>
+          <input type="date" value={filters.deadlineTo} onChange={(event) => update("deadlineTo", event.target.value)} />
+        </label>
+        <label>
+          <span>Min. bütçe</span>
+          <input type="number" min="0" inputMode="numeric" value={filters.budgetMin} onChange={(event) => update("budgetMin", event.target.value)} placeholder="Örn. 100000" />
+        </label>
+        <label>
+          <span>Maks. bütçe</span>
+          <input type="number" min="0" inputMode="numeric" value={filters.budgetMax} onChange={(event) => update("budgetMax", event.target.value)} placeholder="Örn. 5000000" />
+        </label>
+        <label>
+          <span>Para birimi</span>
+          <select value={filters.currency} onChange={(event) => update("currency", event.target.value)}>
+            <option value="">Tümü</option>
+            {currencyOptions.map((currency) => <option key={currency} value={currency}>{currencyLabel(currency)}</option>)}
           </select>
         </label>
         <label>
@@ -961,6 +1293,10 @@ function FilterPanel({ calls, filters, setFilters, categories, funders, refresh,
           </select>
         </label>
       </div>
+      <label className="checkFilter">
+        <input type="checkbox" checked={Boolean(filters.officialOnly)} onChange={(event) => update("officialOnly", event.target.checked)} />
+        <span>Yalnızca resmî/doğrulanmış kaynakları göster</span>
+      </label>
       <div className="syncBox">
         <button className="refresh" onClick={() => refresh()} disabled={loading} title="Verileri güncelle">
           <RefreshCw size={18} className={loading ? "spin" : ""} />
@@ -973,6 +1309,34 @@ function FilterPanel({ calls, filters, setFilters, categories, funders, refresh,
   );
 }
 
+function ActiveFilterBar({ filters, total, count, onClear, onReset }) {
+  if (!filters.length) {
+    return (
+      <div className="activeFilterBar empty">
+        <span>{count} çağrı listeleniyor</span>
+        <small>Filtre ekleyerek başvuru sahibine, bütçeye veya son tarihe göre daraltın.</small>
+      </div>
+    );
+  }
+  return (
+    <div className="activeFilterBar">
+      <div>
+        <strong>{count} sonuç</strong>
+        <small>{total} çağrı içinden filtrelendi</small>
+      </div>
+      <div className="activeFilterChips" aria-label="Aktif filtreler">
+        {filters.map(([key, label]) => (
+          <button key={key} type="button" onClick={() => onClear(key)} title={`${label} filtresini kaldır`}>
+            {label}
+            <X size={14} />
+          </button>
+        ))}
+        <button className="clearAllChip" type="button" onClick={onReset}>Tümünü temizle</button>
+      </div>
+    </div>
+  );
+}
+
 function EmptyState({ title = "Sonuç bulunamadı", text = "Filtreleri değiştirerek tekrar deneyin." }) {
   return <div className="emptyState"><AlertCircle size={24} /><strong>{title}</strong><p>{text}</p></div>;
 }
@@ -981,23 +1345,23 @@ function LoadingState() {
   return <div className="emptyState"><RefreshCw className="spin" size={24} /><strong>Çağrılar yükleniyor</strong><p>Canlı kaynaklar taranıyor.</p></div>;
 }
 
-function CallsAside({ calls, errors }) {
+function CallsAside({ calls, errors, siteContent }) {
   const featured = calls[0];
   const upcoming = calls.slice(1, 4);
 
   return (
     <aside className="callsAside" aria-label="Çağrı özeti">
       <div className="promoPanel">
-        <span className="promoMark"><img src="/logo.png" alt="" aria-hidden="true" /></span>
-        <h2>Doğru hibeyi daha hızlı yakalayın.</h2>
-        <p>Canlı kaynaklar taranır, açık çağrılar tek listede toplanır ve kritik son tarihler öne çıkarılır.</p>
+        <span className="promoMark"><img src={siteContent.images.logoPng || "/logo.png"} alt="" aria-hidden="true" /></span>
+        <h2>{siteContent.home.promoTitle}</h2>
+        <p>{siteContent.home.promoText}</p>
         <a href="/rehber" onClick={(event) => {
           event.preventDefault();
           navigate("/rehber");
         }}>Rehberi Aç</a>
       </div>
 
-      <AdBanner type="custom" size="sidebar" />
+      <SiteAd siteContent={siteContent} size="sidebar" />
 
       {featured && (
         <div className="asidePanel">
@@ -1029,7 +1393,7 @@ function CallsAside({ calls, errors }) {
   );
 }
 
-function HomePage({ model, filters, setFilters }) {
+function HomePage({ model, filters, setFilters, siteContent }) {
   usePageMeta("Hibe Rota | Ana Sayfa", "Ulusal ve uluslararası hibe, fon ve proje destek çağrılarını canlı kaynaklardan izleyin.");
   const { openCalls, urgent, newlyOpened, recentlyDetected, funders, categories, urgentWeek } = model;
   
@@ -1057,9 +1421,12 @@ function HomePage({ model, filters, setFilters }) {
     <>
       <section className="hero content">
         <div className="heroCopy">
-          <h1>Projenize uygun destek çağrısını bulun</h1>
-          <p>Ulusal ve uluslararası binlerce hibe, fon ve destek programını tek noktadan keşfedin. İhtiyacınız olan finansmana en kısa yoldan ulaşın.</p>
+          <h1>{siteContent.home.heroTitle}</h1>
+          <p>{siteContent.home.heroText}</p>
         </div>
+        {siteContent.images.heroImage && (
+          <img className="heroManagedImage" src={siteContent.images.heroImage} alt="" aria-hidden="true" />
+        )}
         <form className="heroSearch" onSubmit={(event) => {
           event.preventDefault();
           navigate(`/cagrilar?scope=${heroScope}&q=${encodeURIComponent(filters.query)}`);
@@ -1078,24 +1445,23 @@ function HomePage({ model, filters, setFilters }) {
         </form>
         <div className="popularTags">
           <div className="sectorChips">
-            {["🌱 Tarım", "💻 Bilişim", "⚡ Enerji", "🏥 Sağlık", "🏭 İmalat", "🎓 Akademi"].map((tag) => (
-              <button key={tag} type="button" className="chipButton" onClick={() => {
-                const q = tag.replace(/[\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, '').trim();
-                setFilters((current) => ({ ...current, query: q, scope: "Tümü" }));
-                navigate(`/cagrilar?q=${encodeURIComponent(q)}&scope=all`);
-              }}>{tag}</button>
+            {sectorChips.map(({ label, query, icon: Icon }) => (
+              <button key={label} type="button" className="chipButton" onClick={() => {
+                setFilters((current) => ({ ...current, query, scope: "Tümü" }));
+                navigate(`/cagrilar?q=${encodeURIComponent(query)}&scope=all`);
+              }}><Icon size={14} aria-hidden="true" />{label}</button>
             ))}
           </div>
         </div>
         <div className="statsInline">
           <span><strong>{catalogData.catalog.length}+</strong> Destek Programı</span>
           <span><strong>{openCalls.length}</strong> Açık Çağrı</span>
-          <span><strong>{funders.length}</strong> Aktif Kaynak</span>
+          <span><strong>{model.sourceCount}</strong> Aktif Kaynak</span>
         </div>
       </section>
 
       <div className="content">
-        <AdBanner type="custom" size="leaderboard" />
+        <SiteAd siteContent={siteContent} size="leaderboard" />
       </div>
 
       {favoriteCalls.length > 0 && (
@@ -1160,7 +1526,7 @@ function HomePage({ model, filters, setFilters }) {
 
       <section className="content homeSummaryGrid">
         <SummaryCard icon={Database} title="Destek Programları" text={`${catalogData.catalog.length} katalog kaydı ve ${categories.length} canlı kategori.`} href="/programlar" />
-        <SummaryCard icon={Building2} title="Kurumlar" text={`${funders.length} aktif fon sağlayıcı canlı kaynaklardan izleniyor.`} href="/kurumlar" />
+        <SummaryCard icon={Building2} title="Kurumlar" text={`${model.sourceCount} aktif kaynak ve fon sağlayıcı canlı olarak izleniyor.`} href="/kurumlar" />
         <SummaryCard icon={CalendarDays} title="Çağrı Takvimi" text="Yaklaşan son başvuru tarihlerini takvim görünümünde takip edin." href="/takvim" />
         <SummaryCard icon={BookOpen} title="Proje Rehberi" text="Proje yazımı ve başvuru süreçleri hakkında bilgi alın." href="/rehber" />
       </section>
@@ -1179,7 +1545,7 @@ function SummaryCard({ icon: Icon, title, text, href }) {
   );
 }
 
-function CallsPage({ route, model, filters, setFilters, refresh, loading, fetchedAt, errors }) {
+function CallsPage({ route, model, filters, setFilters, refresh, loading, fetchedAt, errors, siteContent }) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const scopeFromRoute = routeScope(route.pathname);
   const isUpcoming = route.pathname === "/cagrilar/yaklasan";
@@ -1199,9 +1565,42 @@ function CallsPage({ route, model, filters, setFilters, refresh, loading, fetche
     status: pageFilters.status,
     category: pageFilters.category,
     funder: pageFilters.funder,
+    targetGroup: pageFilters.targetGroup,
+    keyword: pageFilters.keyword,
+    thematicArea: pageFilters.thematicArea,
+    country: pageFilters.country,
+    currency: pageFilters.currency,
+    budgetMin: pageFilters.budgetMin,
+    budgetMax: pageFilters.budgetMax,
     deadlineWithin: pageFilters.deadlineWithin,
+    deadlineFrom: pageFilters.deadlineFrom,
+    deadlineTo: pageFilters.deadlineTo,
+    officialOnly: pageFilters.officialOnly ? "true" : "",
     sort: pageFilters.sort,
   }).toString();
+  const clearFilter = (key) => setFilters((current) => ({
+    ...current,
+    [key]: key === "officialOnly" ? false : key === "scope" ? "Tümü" : key === "status" ? "open" : "",
+  }));
+  const resetFilters = () => setFilters((current) => ({ ...current, ...defaultCallFilters, scope: scopeFromRoute || "Tümü", deadlineWithin: isUpcoming ? "45" : "" }));
+  const activeFilters = [
+    pageFilters.query && ["query", `Arama: ${pageFilters.query}`],
+    pageFilters.scope !== "Tümü" && !scopeFromRoute && ["scope", `Kapsam: ${scopeLabel(pageFilters.scope)}`],
+    pageFilters.status !== "open" && ["status", `Durum: ${statusLabel(pageFilters.status)}`],
+    pageFilters.category && ["category", `Kategori: ${pageFilters.category}`],
+    pageFilters.funder && ["funder", `Kurum: ${pageFilters.funder}`],
+    pageFilters.targetGroup && ["targetGroup", `Hedef: ${pageFilters.targetGroup}`],
+    pageFilters.keyword && ["keyword", `Kalıp: ${keywordLabel(pageFilters.keyword)}`],
+    pageFilters.thematicArea && ["thematicArea", `Tema: ${pageFilters.thematicArea}`],
+    pageFilters.country && ["country", `Ülke: ${pageFilters.country}`],
+    pageFilters.currency && ["currency", `Para birimi: ${currencyLabel(pageFilters.currency)}`],
+    pageFilters.budgetMin && ["budgetMin", `Min. bütçe: ${Number(pageFilters.budgetMin).toLocaleString("tr-TR")}`],
+    pageFilters.budgetMax && ["budgetMax", `Maks. bütçe: ${Number(pageFilters.budgetMax).toLocaleString("tr-TR")}`],
+    pageFilters.deadlineWithin && !isUpcoming && ["deadlineWithin", `Son tarih: ${pageFilters.deadlineWithin} gün`],
+    pageFilters.deadlineFrom && ["deadlineFrom", `Başlangıç: ${formatDate(pageFilters.deadlineFrom)}`],
+    pageFilters.deadlineTo && ["deadlineTo", `Bitiş: ${formatDate(pageFilters.deadlineTo)}`],
+    pageFilters.officialOnly && ["officialOnly", "Resmî kaynak"],
+  ].filter(Boolean);
   return (
     <>
       <Breadcrumb items={[{ label: pageTitle }]} />
@@ -1233,7 +1632,23 @@ function CallsPage({ route, model, filters, setFilters, refresh, loading, fetche
         {filtersOpen && <button className="filterBackdrop" type="button" aria-label="Filtreleri kapat" onClick={() => setFiltersOpen(false)} />}
         <div className={`filterSheet ${filtersOpen ? "open" : ""}`}>
           <button className="sheetClose" type="button" aria-label="Filtreleri kapat" onClick={() => setFiltersOpen(false)}><X size={18} /></button>
-          <FilterPanel calls={model.calls} filters={pageFilters} setFilters={setFilters} categories={model.categoryList} funders={model.funderList} refresh={refresh} loading={loading} fetchedAt={fetchedAt} lockedScope={scopeFromRoute} />
+          <FilterPanel
+            calls={model.calls}
+            filters={pageFilters}
+            setFilters={setFilters}
+            categories={model.categoryList}
+            funders={model.funderList}
+            targetGroupOptions={model.targetGroupOptions}
+            keywordOptions={model.keywordOptions}
+            themeOptions={model.themeOptions}
+            countryOptions={model.countryOptions}
+            currencyOptions={model.currencyOptions}
+            refresh={refresh}
+            loading={loading}
+            fetchedAt={fetchedAt}
+            lockedScope={scopeFromRoute}
+            resultCount={filtered.length}
+          />
         </div>
         <div className="resultsArea">
           <div className="sectionHeader">
@@ -1243,6 +1658,7 @@ function CallsPage({ route, model, filters, setFilters, refresh, loading, fetche
             </div>
             <div className="health">{errors.length ? <AlertCircle size={17} /> : <CheckCircle2 size={17} />}{errors.length ? `${errors.length} kaynak uyarısı` : "Kaynaklar aktif"}</div>
           </div>
+          <ActiveFilterBar filters={activeFilters} total={model.calls.length} count={filtered.length} onClear={clearFilter} onReset={resetFilters} />
           {loading && !model.calls.length ? <CallCardSkeleton /> : (
             <div className="cardGrid">
               {filtered.map((call) => <CallCard key={call.id} call={call} mode="link" />)}
@@ -1250,7 +1666,7 @@ function CallsPage({ route, model, filters, setFilters, refresh, loading, fetche
             </div>
           )}
         </div>
-        <CallsAside calls={filtered} errors={errors} />
+        <CallsAside calls={filtered} errors={errors} siteContent={siteContent} />
       </section>
     </>
   );
@@ -1555,14 +1971,53 @@ function callThemes(call) {
 }
 
 function targetGroups(call) {
-  if (call.targetAudience) return Array.isArray(call.targetAudience) ? call.targetAudience : [call.targetAudience];
-  const text = `${call.title} ${call.summary} ${call.category}`.toLocaleLowerCase("tr-TR");
+  const explicit = Array.isArray(call.targetAudience) ? call.targetAudience : call.targetAudience ? [call.targetAudience] : [];
+  if (explicit.length) return explicit;
+  const text = [
+    call.title,
+    call.summary,
+    call.category,
+    call.programme,
+    call.supportType,
+    ...(call.eligibleInstitutions || []),
+  ].filter(Boolean).join(" ").toLocaleLowerCase("tr-TR");
   const groups = [];
   if (/öğrenci|student|doctoral|doktora/.test(text)) groups.push("Öğrenciler ve doktora araştırmacıları");
   if (/akadem|üniversite|university|researcher|araştırmac/.test(text)) groups.push("Akademisyenler ve araştırmacılar");
   if (/kobi|sme|firma|şirket|company|startup|girişim/.test(text)) groups.push("KOBİ'ler, girişimler ve şirketler");
   if (/kamu|belediye|public/.test(text)) groups.push("Kamu kurumları ve yerel yönetimler");
+  if (/ngo|stk|dernek|vakıf|nonprofit/.test(text)) groups.push("STK'lar ve sosyal girişimler");
   return groups.length ? groups : [targetAudience(call)];
+}
+
+function audienceChipLabels(call) {
+  const rawGroups = [
+    ...targetGroups(call),
+    ...(Array.isArray(call.eligibleInstitutions) ? call.eligibleInstitutions : [call.eligibleInstitutions]),
+    call.eligibleApplicants,
+    call.target_audience,
+    call.eligible_applicants,
+  ].filter(Boolean);
+  const text = normalizeSearch(rawGroups.join(" "));
+  const labels = [];
+  const add = (label, pattern) => {
+    if (pattern.test(text) && !labels.includes(label)) labels.push(label);
+  };
+
+  add("Öğrenci", /ogrenci|student|lisans|graduate|undergraduate/);
+  add("Akademisyen", /akadem|academ/);
+  add("Araştırmacı", /arastirmaci|researcher|research|postdoc|doktora|doctoral/);
+  add("Şirket / KOBİ", /kobi|sme|firma|sirket|company|startup|girisim|sanayi|isletme|industry/);
+  add("Kurum / Kuruluş", /kurum|kurulus|institution|universite|university|kamu|belediye|oda|tto|teknopark|stk|altyapi/);
+  add("Sağlık Profesyoneli", /doktor|doctor|clinical|klinik|saglik/);
+
+  if (labels.length) return labels;
+  return rawGroups
+    .map((group) => cleanHtml(group).replace(/\s+ve\s+/gi, ", "))
+    .flatMap((group) => group.split(/[,;/+]/))
+    .map((group) => group.trim())
+    .filter(Boolean)
+    .slice(0, 4);
 }
 
 function callBenefits(call) {
@@ -1767,27 +2222,28 @@ function CalendarSection({ urgent }) {
   );
 }
 
-function GuidePage() {
+function GuidePage({ siteContent }) {
   usePageMeta("Proje Rehberi | Hibe Rota", "Proje başvurusu hazırlamak için çağrı okuma, bütçe, ortaklık ve yazım rehberi.");
   return (
     <>
       <Breadcrumb items={[{ label: "Proje Rehberi" }]} />
       <div className="content">
-        <AdBanner type="custom" size="leaderboard" />
+        <SiteAd siteContent={siteContent} size="leaderboard" />
       </div>
       <section className="content guideSection">
-        <GuideContent />
+        <GuideContent siteContent={siteContent} />
       </section>
     </>
   );
 }
 
-function GuideArticlePage({ route }) {
+function GuideArticlePage({ route, siteContent }) {
   const slug = decodeURIComponent(route.pathname.replace("/rehber/", ""));
-  const article = guideCards.find((card) => card.slug === slug);
+  const articles = siteContent.guide.articles;
+  const article = articles.find((card) => card.slug === slug);
   usePageMeta(`${article?.title || "Rehber Yazısı"} | Hibe Rota`, article?.text || "Proje başvuru rehberi makalesi.");
   if (!article) return <NotFoundPage />;
-  const related = guideCards.filter((card) => card.slug !== article.slug).slice(0, 3);
+  const related = articles.filter((card) => card.slug !== article.slug).slice(0, 3);
   return (
     <>
       <Breadcrumb items={[{ label: "Proje Rehberi", href: "/rehber" }, { label: article.title }]} />
@@ -1797,9 +2253,10 @@ function GuideArticlePage({ route }) {
           <h1>{article.title}</h1>
           <p>{article.text}</p>
           <div><Clock3 size={16} /> {article.time} okuma</div>
+          {article.coverImage && <img className="articleCoverImage" src={article.coverImage} alt="" aria-hidden="true" />}
         </header>
         <div className="content" style={{ padding: "0 0 2rem 0" }}>
-          <AdBanner type="custom" size="leaderboard" />
+          <SiteAd siteContent={siteContent} size="leaderboard" />
         </div>
         <div className="articleLayout">
           <aside className="articleToc" aria-label="Makale içindekiler">
@@ -1808,7 +2265,7 @@ function GuideArticlePage({ route }) {
               <a key={section.title} href={`#${normalizeSearch(section.title).replace(/\s+/g, "-")}`}>{section.title}</a>
             ))}
             <div style={{ marginTop: "2rem" }}>
-              <AdBanner type="custom" size="sidebar" />
+              <SiteAd siteContent={siteContent} size="sidebar" />
             </div>
           </aside>
           <div className="articleBody">
@@ -1853,28 +2310,29 @@ function GuideCard({ card }) {
   );
 }
 
-function GuideContent() {
+function GuideContent({ siteContent }) {
+  const articles = siteContent.guide.articles;
   return (
     <>
       <div className="guideHero">
-        <h1>Proje Başvuru Rehberi</h1>
-        <p>Araştırma ve yenilik projelerinizi başarıyla hazırlamak, bütçelendirmek ve yönetmek için kapsamlı bilgi merkezi.</p>
+        <h1>{siteContent.guide.heroTitle}</h1>
+        <p>{siteContent.guide.heroText}</p>
         <label><Search size={21} /><input placeholder="Rehberde arayın: bütçe, TRL, ortaklık..." aria-label="Rehberde ara" /></label>
       </div>
       <div className="guideLayout">
         <div className="guideSidebar">
-          <nav aria-label="Rehber kategorileri">{["Tüm Kategoriler", "Çağrı Okuma", "Proje Yazımı", "Bütçe Hazırlama", "Ortaklık Kurma", "Değerlendirme Süreci"].map((item, index) => <a key={item} className={index === 0 ? "active" : ""} href="/rehber">{item}</a>)}</nav>
-          <AdBanner type="custom" size="sidebar" />
+          <nav aria-label="Rehber kategorileri">{siteContent.guide.categories.map((item, index) => <a key={item} className={index === 0 ? "active" : ""} href="/rehber">{item}</a>)}</nav>
+          <SiteAd siteContent={siteContent} size="sidebar" />
         </div>
         <div className="guideCards">
-          {guideCards.map((card) => (
+          {articles.map((card) => (
             <GuideCard key={card.slug} card={card} />
           ))}
         </div>
       </div>
       <div className="glossary">
         <h2><BookOpen size={27} /> Proje Terimleri Sözlüğü</h2>
-        <div><p><strong>Ar-Ge</strong> Bilgi dağarcığını artırmak için yürütülen sistematik yaratıcı çalışmalar.</p><p><strong>TRL</strong> Teknolojinin olgunluğunu 1 ile 9 arasında değerlendiren seviye sistemi.</p><p><strong>Hibe / Eş Finansman</strong> Proje maliyetinin bir kısmının fon sağlayıcı tarafından karşılanması.</p></div>
+        <div>{siteContent.guide.glossary.map((item) => <p key={item.term}><strong>{item.term}</strong> {item.definition}</p>)}</div>
       </div>
     </>
   );
@@ -2079,15 +2537,355 @@ function StaticPage({ type }) {
   );
 }
 
-function AdminPage({ model, errors, fetchedAt }) {
-  usePageMeta("Admin | Hibe Rota", "Kaynak sağlığı, manuel inceleme ve otomasyon özet ekranı.");
+function slugifyText(value) {
+  return cleanHtml(value)
+    .toLocaleLowerCase("tr-TR")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ı/g, "i")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function AdminPage({ model, errors, fetchedAt, siteContent, onContentSaved }) {
+  usePageMeta("Admin Paneli | Hibe Rota", "Site içerikleri, görseller, proje rehberi yazıları ve otomasyon yönetimi.");
   const openCalls = model.openCalls.length;
   const manualReview = model.calls.filter((call) => call.requiresManualReview).length;
   const lowConfidence = model.calls.filter((call) => (call.confidenceScore || 0) < 75).length;
+  const [activeTab, setActiveTab] = useState("guide");
+  const [token, setToken] = useState(() => {
+    try {
+      return window.localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || "";
+    } catch {
+      return "";
+    }
+  });
+  const [session, setSession] = useState({ checking: Boolean(token), authenticated: false, username: "", expiresAt: null });
+  const [loginForm, setLoginForm] = useState({ username: "", password: "" });
+  const [loginStatus, setLoginStatus] = useState("");
+  const [loggingIn, setLoggingIn] = useState(false);
+  const [draft, setDraft] = useState(() => mergeSiteContent(siteContent));
+  const [selectedArticle, setSelectedArticle] = useState(siteContent.guide.articles[0]?.slug || "");
+  const [status, setStatus] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const next = mergeSiteContent(siteContent);
+    setDraft(next);
+    setSelectedArticle((current) => current || next.guide.articles[0]?.slug || "");
+  }, [siteContent]);
+
+  useEffect(() => {
+    if (!token) {
+      setSession({ checking: false, authenticated: false, username: "", expiresAt: null });
+      return;
+    }
+    let cancelled = false;
+    setSession((current) => ({ ...current, checking: true }));
+    fetch("/api/v1/admin/session", { headers: { Authorization: `Bearer ${token}` } })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload?.error || "Oturum doğrulanamadı.");
+        if (!cancelled) setSession({ checking: false, authenticated: true, username: payload.username || "", expiresAt: payload.expiresAt || null });
+      })
+      .catch(() => {
+        try {
+          window.localStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+        } catch {}
+        if (!cancelled) {
+          setToken("");
+          setSession({ checking: false, authenticated: false, username: "", expiresAt: null });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  const articles = draft.guide.articles;
+  const selected = articles.find((article) => article.slug === selectedArticle) || articles[0];
+  const setPath = (section, key, value) => setDraft((current) => ({
+    ...current,
+    [section]: { ...current[section], [key]: value },
+  }));
+  const updateGuide = (key, value) => setDraft((current) => ({
+    ...current,
+    guide: { ...current.guide, [key]: value },
+  }));
+  const updateArticle = (slug, patch) => setDraft((current) => ({
+    ...current,
+    guide: {
+      ...current.guide,
+      articles: current.guide.articles.map((article) => article.slug === slug ? { ...article, ...patch } : article),
+    },
+  }));
+  const updateSection = (slug, index, patch) => setDraft((current) => ({
+    ...current,
+    guide: {
+      ...current.guide,
+      articles: current.guide.articles.map((article) => article.slug === slug ? {
+        ...article,
+        sections: article.sections.map((section, sectionIndex) => sectionIndex === index ? { ...section, ...patch } : section),
+      } : article),
+    },
+  }));
+  const addArticle = () => {
+    const title = "Yeni Rehber Yazısı";
+    const baseSlug = slugifyText(title);
+    const uniqueSlug = `${baseSlug}-${Date.now().toString(36)}`;
+    const article = {
+      slug: uniqueSlug,
+      tag: "Proje Rehberi",
+      time: "10 dk",
+      title,
+      text: "Bu yazının kısa açıklamasını yazın.",
+      coverImage: "",
+      sections: [{ title: "Giriş", body: "Yazının ilk bölümünü buraya ekleyin." }],
+    };
+    setDraft((current) => ({
+      ...current,
+      guide: { ...current.guide, articles: [article, ...current.guide.articles] },
+    }));
+    setSelectedArticle(uniqueSlug);
+  };
+  const removeArticle = (slug) => {
+    setDraft((current) => {
+      const nextArticles = current.guide.articles.filter((article) => article.slug !== slug);
+      setSelectedArticle(nextArticles[0]?.slug || "");
+      return { ...current, guide: { ...current.guide, articles: nextArticles } };
+    });
+  };
+  const login = async (event) => {
+    event.preventDefault();
+    setLoggingIn(true);
+    setLoginStatus("");
+    try {
+      const response = await fetch("/api/v1/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(loginForm),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error === "invalid_admin_credentials" ? "Kullanıcı adı veya şifre hatalı." : "Admin girişi yapılamadı.");
+      window.localStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, payload.token);
+      setToken(payload.token);
+      setSession({ checking: false, authenticated: true, username: payload.username || loginForm.username, expiresAt: payload.expiresAt || null });
+      setLoginForm({ username: "", password: "" });
+    } catch (error) {
+      setLoginStatus(error.message || "Admin girişi yapılamadı.");
+    } finally {
+      setLoggingIn(false);
+    }
+  };
+  const logout = () => {
+    try {
+      window.localStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+    } catch {}
+    setToken("");
+    setSession({ checking: false, authenticated: false, username: "", expiresAt: null });
+    setStatus("");
+  };
+  const save = async () => {
+    if (!session.authenticated || !token) {
+      setStatus("Kaydetmek için admin girişi yapmalısınız.");
+      return;
+    }
+    setSaving(true);
+    setStatus("");
+    try {
+      const response = await fetch("/api/v1/admin/site-content", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ content: draft }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload?.error || "İçerik kaydedilemedi.");
+      setDraft(mergeSiteContent(payload.content));
+      setStatus("İçerik kaydedildi. Public sayfalar güncel içerikle beslenecek.");
+      onContentSaved();
+    } catch (error) {
+      setStatus(error.message || "İçerik kaydedilemedi.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (session.checking) {
+    return (
+      <>
+        <Breadcrumb items={[{ label: "Admin" }]} />
+        <PageHero eyebrow="Admin" title="Admin Paneli" text="Oturum doğrulanıyor." />
+        <section className="content adminLoginShell">
+          <article className="adminLoginCard"><RefreshCw size={20} className="spin" /><strong>Oturum kontrol ediliyor</strong></article>
+        </section>
+      </>
+    );
+  }
+
+  if (!session.authenticated) {
+    return (
+      <>
+        <Breadcrumb items={[{ label: "Admin" }]} />
+        <PageHero eyebrow="Admin" title="Admin Girişi" text="Bu alana yalnızca yetkili kullanıcı adı ve şifreyle erişilebilir." />
+        <section className="content adminLoginShell">
+          <form className="adminLoginCard" onSubmit={login}>
+            <ShieldCheck size={30} />
+            <h2>Yetkili Girişi</h2>
+            <label>
+              Kullanıcı adı
+              <input value={loginForm.username} onChange={(event) => setLoginForm((current) => ({ ...current, username: event.target.value }))} autoComplete="username" required />
+            </label>
+            <label>
+              Şifre
+              <input value={loginForm.password} onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))} type="password" autoComplete="current-password" required />
+            </label>
+            <button className="primaryAction" type="submit" disabled={loggingIn}>
+              {loggingIn ? <RefreshCw size={16} className="spin" /> : <ShieldCheck size={16} />}
+              Giriş Yap
+            </button>
+            {loginStatus && <p className="adminStatus" role="alert">{loginStatus}</p>}
+          </form>
+        </section>
+      </>
+    );
+  }
+
   return (
     <>
       <Breadcrumb items={[{ label: "Admin" }]} />
-      <PageHero eyebrow="Admin" title="Otomasyon Yönetimi" text="Kaynak sağlığı, kalite sinyalleri ve kuyruk durumu için operasyon ekranı." />
+      <PageHero eyebrow="Admin" title="İçerik ve Site Yönetimi" text="Görselleri, ana sayfa bloklarını, sponsor alanlarını ve proje rehberi blog yazılarını tek panelden düzenleyin." />
+      <section className="content adminEditorShell">
+        <aside className="adminSidebar">
+          <div className="adminSessionBox">
+            <span>Oturum açık</span>
+            <strong>{session.username || "Admin"}</strong>
+            {session.expiresAt && <small>{formatDateTime(session.expiresAt)} tarihine kadar</small>}
+          </div>
+          <nav aria-label="Admin bölümleri">
+            {[
+              ["guide", "Proje rehberi"],
+              ["visuals", "Görseller"],
+              ["home", "Ana sayfa"],
+              ["system", "Sistem"],
+            ].map(([key, label]) => (
+              <button key={key} type="button" className={activeTab === key ? "active" : ""} onClick={() => setActiveTab(key)}>{label}</button>
+            ))}
+          </nav>
+          <button className="primaryAction" type="button" onClick={save} disabled={saving}>
+            {saving ? <RefreshCw size={16} className="spin" /> : <CheckCircle2 size={16} />}
+            Değişiklikleri Kaydet
+          </button>
+          <button className="secondaryAction" type="button" onClick={logout}>Çıkış Yap</button>
+          {status && <p className="adminStatus" role="status">{status}</p>}
+        </aside>
+
+        <div className="adminEditorMain">
+          {activeTab === "visuals" && (
+            <section className="adminPanel">
+              <div className="panelTitle"><h2><FileText size={22} /> Görsel Alanları</h2></div>
+              <div className="adminFormGrid">
+                {[
+                  ["logoSvg", "Header logo SVG"],
+                  ["logoPng", "Kart/promo logo PNG"],
+                  ["heroImage", "Ana sayfa hero görseli"],
+                  ["leaderboardAdImage", "Yatay sponsor görseli"],
+                  ["sidebarAdImage", "Yan sponsor görseli"],
+                  ["adLink", "Sponsor bağlantısı"],
+                ].map(([key, label]) => (
+                  <label key={key}>
+                    {label}
+                    <input value={draft.images[key] || ""} onChange={(event) => setPath("images", key, event.target.value)} placeholder="/logo.svg veya https://..." />
+                  </label>
+                ))}
+              </div>
+              <div className="adminImagePreview">
+                <img src={draft.images.logoSvg || "/logo.svg"} alt="Logo önizleme" />
+                {draft.images.heroImage ? <img src={draft.images.heroImage} alt="Hero önizleme" /> : <span>Hero görseli eklenmedi</span>}
+              </div>
+            </section>
+          )}
+
+          {activeTab === "home" && (
+            <section className="adminPanel">
+              <div className="panelTitle"><h2><Sparkles size={22} /> Ana Sayfa Bölümleri</h2></div>
+              <label>Hero başlığı<input value={draft.home.heroTitle} onChange={(event) => setPath("home", "heroTitle", event.target.value)} /></label>
+              <label>Hero açıklaması<textarea rows={4} value={draft.home.heroText} onChange={(event) => setPath("home", "heroText", event.target.value)} /></label>
+              <label>Yan promo başlığı<input value={draft.home.promoTitle} onChange={(event) => setPath("home", "promoTitle", event.target.value)} /></label>
+              <label>Yan promo açıklaması<textarea rows={3} value={draft.home.promoText} onChange={(event) => setPath("home", "promoText", event.target.value)} /></label>
+            </section>
+          )}
+
+          {activeTab === "guide" && (
+            <section className="adminPanel guideEditor">
+              <div className="adminPanelHeader">
+                <div className="panelTitle"><h2><BookOpen size={22} /> Proje Rehberi Blog Editörü</h2></div>
+                <button type="button" onClick={addArticle}><FileText size={16} /> Yeni Yazı</button>
+              </div>
+              <div className="adminFormGrid">
+                <label>Rehber sayfası başlığı<input value={draft.guide.heroTitle} onChange={(event) => updateGuide("heroTitle", event.target.value)} /></label>
+                <label>Kategoriler<input value={draft.guide.categories.join(", ")} onChange={(event) => updateGuide("categories", event.target.value.split(",").map((item) => item.trim()).filter(Boolean))} /></label>
+              </div>
+              <label>Rehber sayfası açıklaması<textarea rows={3} value={draft.guide.heroText} onChange={(event) => updateGuide("heroText", event.target.value)} /></label>
+              <div className="articleEditorLayout">
+                <div className="articleList">
+                  {articles.map((article) => (
+                    <button key={article.slug} type="button" className={selected?.slug === article.slug ? "active" : ""} onClick={() => setSelectedArticle(article.slug)}>
+                      <strong>{article.title}</strong>
+                      <span>{article.tag} · {article.sections.length} bölüm</span>
+                    </button>
+                  ))}
+                </div>
+                {selected ? (
+                  <div className="articleEditor">
+                    <div className="adminFormGrid">
+                      <label>Başlık<input value={selected.title} onChange={(event) => {
+                        const nextTitle = event.target.value;
+                        updateArticle(selected.slug, { title: nextTitle, slug: slugifyText(nextTitle) || selected.slug });
+                        setSelectedArticle(slugifyText(nextTitle) || selected.slug);
+                      }} /></label>
+                      <label>Slug<input value={selected.slug} onChange={(event) => {
+                        const nextSlug = slugifyText(event.target.value) || selected.slug;
+                        updateArticle(selected.slug, { slug: nextSlug });
+                        setSelectedArticle(nextSlug);
+                      }} /></label>
+                      <label>Kategori<input value={selected.tag} onChange={(event) => updateArticle(selected.slug, { tag: event.target.value })} /></label>
+                      <label>Okuma süresi<input value={selected.time} onChange={(event) => updateArticle(selected.slug, { time: event.target.value })} /></label>
+                    </div>
+                    <label>Kısa açıklama<textarea rows={3} value={selected.text} onChange={(event) => updateArticle(selected.slug, { text: event.target.value })} /></label>
+                    <label>Kapak görseli URL<input value={selected.coverImage || ""} onChange={(event) => updateArticle(selected.slug, { coverImage: event.target.value })} placeholder="https://... veya /gorsel.png" /></label>
+                    <div className="sectionEditorHeader">
+                      <h3>Yazı Bölümleri</h3>
+                      <button type="button" onClick={() => updateArticle(selected.slug, { sections: [...selected.sections, { title: "Yeni bölüm", body: "" }] })}>Bölüm Ekle</button>
+                    </div>
+                    {selected.sections.map((section, index) => (
+                      <article className="sectionEditor" key={`${selected.slug}-${index}`}>
+                        <div>
+                          <label>Bölüm başlığı<input value={section.title} onChange={(event) => updateSection(selected.slug, index, { title: event.target.value })} /></label>
+                          <button type="button" aria-label="Bölümü sil" onClick={() => updateArticle(selected.slug, { sections: selected.sections.filter((_, sectionIndex) => sectionIndex !== index) })}><X size={16} /></button>
+                        </div>
+                        <label>İçerik<textarea rows={6} value={section.body} onChange={(event) => updateSection(selected.slug, index, { body: event.target.value })} /></label>
+                      </article>
+                    ))}
+                    <button className="dangerButton" type="button" onClick={() => removeArticle(selected.slug)}>Bu Yazıyı Sil</button>
+                  </div>
+                ) : <EmptyState title="Rehber yazısı yok" text="Yeni Yazı butonuyla ilk blog içeriğini oluşturun." />}
+              </div>
+            </section>
+          )}
+
+          {activeTab === "system" && (
+            <section className="adminPanel">
+              <div className="panelTitle"><h2><RefreshCw size={22} /> Sistem Sağlığı</h2></div>
+              <div className="detailGrid">
+                <DetailItem label="Son çekim" value={formatDateTime(fetchedAt)} />
+                <DetailItem label="Kaynak uyarısı" value={errors.length} />
+                <DetailItem label="Yakında kapanan" value={model.urgent.length} />
+                <DetailItem label="Yeni yakalanan" value={model.recentlyDetected.length} />
+              </div>
+            </section>
+          )}
+        </div>
+      </section>
       <section className="content adminGrid">
         <article><Database size={24} /><strong>{model.funderList.length}</strong><span>Aktif kaynak/kurum</span></article>
         <article><ClipboardList size={24} /><strong>{openCalls}</strong><span>Açık çağrı</span></article>
@@ -2384,16 +3182,28 @@ function NotFoundPage() {
 function App() {
   const route = useRoute();
   const routeSearch = route.params.toString();
-  const { calls, errors, fetchedAt, loading, refresh } = useCalls();
+  const { calls, errors, fetchedAt, loading, refresh, automation } = useCalls();
+  const { content: siteContent, refresh: refreshSiteContent } = useSiteContent();
   const [filters, setFilters] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return {
+      ...defaultCallFilters,
       query: params.get("q") || "",
       scope: queryToScope(params.get("scope")),
       status: params.get("status") || "open",
       category: params.get("category") || "",
       funder: params.get("funder") || "",
+      targetGroup: params.get("targetGroup") || params.get("audience") || "",
+      keyword: params.get("keyword") || params.get("keywords") || "",
+      thematicArea: params.get("thematicArea") || params.get("theme") || "",
+      country: params.get("country") || "",
+      currency: params.get("currency") || "",
+      budgetMin: params.get("budgetMin") || "",
+      budgetMax: params.get("budgetMax") || "",
       deadlineWithin: params.get("deadlineWithin") || "",
+      deadlineFrom: params.get("deadlineFrom") || "",
+      deadlineTo: params.get("deadlineTo") || "",
+      officialOnly: booleanFilterParam(params.get("officialOnly")),
       sort: params.get("sort") || "deadline_asc",
     };
   });
@@ -2426,7 +3236,17 @@ function App() {
       status: params.get("status") || current.status,
       category: params.has("category") ? params.get("category") : current.category,
       funder: params.has("funder") ? params.get("funder") : current.funder,
+      targetGroup: params.has("targetGroup") ? params.get("targetGroup") : current.targetGroup,
+      keyword: params.has("keyword") ? params.get("keyword") : params.has("keywords") ? params.get("keywords") : current.keyword,
+      thematicArea: params.has("thematicArea") ? params.get("thematicArea") : current.thematicArea,
+      country: params.has("country") ? params.get("country") : current.country,
+      currency: params.has("currency") ? params.get("currency") : current.currency,
+      budgetMin: params.has("budgetMin") ? params.get("budgetMin") : current.budgetMin,
+      budgetMax: params.has("budgetMax") ? params.get("budgetMax") : current.budgetMax,
       deadlineWithin: params.has("deadlineWithin") ? params.get("deadlineWithin") : (route.pathname === "/cagrilar/yaklasan" ? "45" : current.deadlineWithin),
+      deadlineFrom: params.has("deadlineFrom") ? params.get("deadlineFrom") : current.deadlineFrom,
+      deadlineTo: params.has("deadlineTo") ? params.get("deadlineTo") : current.deadlineTo,
+      officialOnly: params.has("officialOnly") ? booleanFilterParam(params.get("officialOnly")) : current.officialOnly,
       sort: params.get("sort") || current.sort,
     }));
   }, [calls, route.pathname, routeSearch]);
@@ -2452,12 +3272,25 @@ function App() {
       });
     const funderCounts = new Map();
     const categoryCounts = new Map();
+    const targetGroupCounts = new Map();
+    const keywordOptions = buildKeywordOptions(indexedCalls);
+    const themeCounts = new Map();
+    const countryCounts = new Map();
+    const currencyCounts = new Map();
     indexedCalls.forEach((call) => {
       funderCounts.set(call.funder, (funderCounts.get(call.funder) || 0) + 1);
       categoryCounts.set(call.category || "Genel", (categoryCounts.get(call.category || "Genel") || 0) + 1);
+      targetGroups(call).forEach((group) => targetGroupCounts.set(group, (targetGroupCounts.get(group) || 0) + 1));
+      callThemes(call).forEach((theme) => themeCounts.set(theme, (themeCounts.get(theme) || 0) + 1));
+      [call.country, ...(call.eligibleCountries || [])].filter(Boolean).forEach((country) => countryCounts.set(country, (countryCounts.get(country) || 0) + 1));
+      if (call.currency) currencyCounts.set(call.currency, (currencyCounts.get(call.currency) || 0) + 1);
     });
     const funders = [...funderCounts.entries()].sort((a, b) => b[1] - a[1]);
     const categories = [...categoryCounts.entries()].sort((a, b) => b[1] - a[1]);
+    const targetGroupOptions = [...targetGroupCounts.entries()].sort((a, b) => b[1] - a[1]).map(([group]) => group).slice(0, 18);
+    const themeOptions = [...themeCounts.entries()].sort((a, b) => b[1] - a[1]).map(([theme]) => theme).slice(0, 24);
+    const countryOptions = [...countryCounts.entries()].sort((a, b) => b[1] - a[1]).map(([country]) => country).slice(0, 24);
+    const currencyOptions = [...currencyCounts.keys()].sort();
     const urgentWeek = urgent.filter((call) => {
       const left = daysLeft(call.deadline);
       return left !== null && left <= 7;
@@ -2472,13 +3305,19 @@ function App() {
       categories,
       funderList: funders.map(([funder]) => funder),
       categoryList: categories.map(([category]) => category),
+      targetGroupOptions,
+      keywordOptions,
+      themeOptions,
+      countryOptions,
+      currencyOptions,
       urgentWeek,
+      sourceCount: automation?.metrics?.activeSources ?? funders.length,
     };
-  }, [calls]);
+  }, [calls, automation]);
 
   let page;
-  if (route.pathname === "/") page = <HomePage model={model} filters={filters} setFilters={setFilters} />;
-  else if (route.pathname === "/cagrilar" || route.pathname === "/cagrilar/ulusal" || route.pathname === "/cagrilar/avrupa" || route.pathname === "/cagrilar/uluslararasi" || route.pathname === "/cagrilar/yaklasan" || route.pathname === "/cagrilar/yeni") page = <CallsPage route={route} model={model} filters={filters} setFilters={setFilters} refresh={refresh} loading={loading} fetchedAt={fetchedAt} errors={errors} />;
+  if (route.pathname === "/") page = <HomePage model={model} filters={filters} setFilters={setFilters} siteContent={siteContent} />;
+  else if (route.pathname === "/cagrilar" || route.pathname === "/cagrilar/ulusal" || route.pathname === "/cagrilar/avrupa" || route.pathname === "/cagrilar/uluslararasi" || route.pathname === "/cagrilar/yaklasan" || route.pathname === "/cagrilar/yeni") page = <CallsPage route={route} model={model} filters={filters} setFilters={setFilters} refresh={refresh} loading={loading} fetchedAt={fetchedAt} errors={errors} siteContent={siteContent} />;
   else if (route.pathname.startsWith("/cagrilar/") || route.pathname.startsWith("/cagri/")) page = <CallDetailPage route={route} model={model} />;
   else if (route.pathname === "/hibe-anketi") page = <GrantSurveyPage />;
   else if (route.pathname === "/programlar") page = <ProgrammesPage model={model} />;
@@ -2486,9 +3325,9 @@ function App() {
   else if (route.pathname === "/kurumlar") page = <FundersPage model={model} />;
   else if (route.pathname.startsWith("/kurum/")) page = <FunderDetailPage route={route} model={model} />;
   else if (route.pathname === "/takvim") page = <CalendarPage model={model} />;
-  else if (route.pathname === "/rehber") page = <GuidePage />;
-  else if (route.pathname.startsWith("/rehber/")) page = <GuideArticlePage route={route} />;
-  else if (route.pathname === "/admin") page = <AdminPage model={model} errors={errors} fetchedAt={fetchedAt} />;
+  else if (route.pathname === "/rehber") page = <GuidePage siteContent={siteContent} />;
+  else if (route.pathname.startsWith("/rehber/")) page = <GuideArticlePage route={route} siteContent={siteContent} />;
+  else if (route.pathname === "/admin") page = <AdminPage model={model} errors={errors} fetchedAt={fetchedAt} siteContent={siteContent} onContentSaved={refreshSiteContent} />;
   else if (route.pathname === "/iletisim") page = <ContactPage />;
   else if (route.pathname === "/gizlilik-politikasi") page = <PrivacyPolicyPage />;
   else if (["/hakkimizda", "/sss", "/kullanim-kosullari"].includes(route.pathname)) page = <StaticPage type={route.pathname} />;
@@ -2496,7 +3335,7 @@ function App() {
 
   return (
     <div className="appShell">
-      <Header route={route} />
+      <Header route={route} siteContent={siteContent} />
       <main>{page}</main>
       <FirstVisitSurveyModal />
       <NewsletterCard />

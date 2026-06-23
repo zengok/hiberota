@@ -7,7 +7,7 @@ services:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: 5173
-      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-change-me-with-a-long-random-secret}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:?set ADMIN_API_TOKEN in .env}
       DATABASE_PATH: /app/.hiberota/database.sqlite
       REDIS_URL: redis://redis:6379
     volumes:
@@ -26,7 +26,7 @@ services:
     profiles: ["worker"]
     environment:
       NODE_ENV: production
-      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-change-me-with-a-long-random-secret}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:?set ADMIN_API_TOKEN in .env}
       DATABASE_PATH: /app/.hiberota/database.sqlite
       REDIS_URL: redis://redis:6379
     volumes:
@@ -46,7 +46,7 @@ services:
     environment:
       POSTGRES_DB: hiberota
       POSTGRES_USER: hiberota
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-postgres-only-change-before-use}
     volumes:
       - postgres-data:/var/lib/postgresql/data
 

@@ -61,6 +61,20 @@ export const LINK_STATUSES = {
   UNKNOWN: "UNKNOWN",
 };
 
+export const SOURCE_VERIFICATION_STATUSES = {
+  DISCOVERED: "discovered",
+  PENDING_VERIFICATION: "pending_verification",
+  VERIFIED: "verified",
+  REJECTED: "rejected",
+};
+
+export const SOURCE_HEALTH_STATUSES = {
+  HEALTHY: "healthy",
+  DEGRADED: "degraded",
+  FAILING: "failing",
+  DISABLED: "disabled",
+};
+
 export const AUTOMATION_CONFIG = {
   version: "1.0.0",
   defaultLanguage: "tr",
@@ -73,7 +87,7 @@ export const AUTOMATION_CONFIG = {
   closingSoonDays: Number(process.env.CLOSING_SOON_DAYS || 7),
 };
 
-export const SOURCE_REGISTRY = [
+const CORE_SOURCE_REGISTRY = [
   {
     id: "tubitak",
     name: "TÜBİTAK",
@@ -160,6 +174,23 @@ export const SOURCE_REGISTRY = [
     config: { scope: "europe", rateLimitMs: 1500 },
   },
   {
+    id: "hibeportali-cascade",
+    name: "HibePortalı Kademeli Çağrılar",
+    baseUrl: "https://hibeportali.com",
+    listUrls: ["https://hibeportali.com/kademeli-cagrilar/"],
+    sourceType: "secondary",
+    crawlMethod: "html",
+    country: "TR",
+    language: "tr",
+    timezone: "Europe/Istanbul",
+    crawlFrequencyMinutes: Number(process.env.CRAWL_FREQ_EU_MIN || 120),
+    trustScore: 74,
+    isActive: true,
+    requiresJavascript: false,
+    adapterName: "hibeportali-cascade-adapter",
+    config: { scope: "europe", rateLimitMs: 1500 },
+  },
+  {
     id: "grants-gov",
     name: "Grants.gov",
     baseUrl: "https://api.grants.gov",
@@ -194,6 +225,231 @@ export const SOURCE_REGISTRY = [
     config: { scope: "national", rateLimitMs: 1500 },
   },
 ];
+
+const DEVELOPMENT_AGENCIES = [
+  ["istka", "İstanbul Kalkınma Ajansı", "istanbul"],
+  ["ankaraka", "Ankara Kalkınma Ajansı", "ankara"],
+  ["izka", "İzmir Kalkınma Ajansı", "izmir"],
+  ["marka", "Doğu Marmara Kalkınma Ajansı", "kocaeli"],
+  ["bebka", "Bursa Eskişehir Bilecik Kalkınma Ajansı", "bursa"],
+  ["trakyaka", "Trakya Kalkınma Ajansı", "edirne"],
+  ["gmka", "Güney Marmara Kalkınma Ajansı", "balikesir"],
+  ["geka", "Güney Ege Kalkınma Ajansı", "denizli"],
+  ["baka", "Batı Akdeniz Kalkınma Ajansı", "antalya"],
+  ["mevka", "Mevlana Kalkınma Ajansı", "konya"],
+  ["zeka", "Zafer Kalkınma Ajansı", "kutahya"],
+  ["oran", "Orta Anadolu Kalkınma Ajansı", "kayseri"],
+  ["ahika", "Ahiler Kalkınma Ajansı", "nevsehir"],
+  ["bakka", "Batı Karadeniz Kalkınma Ajansı", "zonguldak"],
+  ["kuzka", "Kuzey Anadolu Kalkınma Ajansı", "kastamonu"],
+  ["oka", "Orta Karadeniz Kalkınma Ajansı", "samsun"],
+  ["doka", "Doğu Karadeniz Kalkınma Ajansı", "trabzon"],
+  ["cukurovaka", "Çukurova Kalkınma Ajansı", "adana"],
+  ["dogaka", "Doğu Akdeniz Kalkınma Ajansı", "hatay"],
+  ["ika", "İpekyolu Kalkınma Ajansı", "gaziantep"],
+  ["karacadag", "Karacadağ Kalkınma Ajansı", "diyarbakir"],
+  ["dika", "Dicle Kalkınma Ajansı", "mardin"],
+  ["fka", "Fırat Kalkınma Ajansı", "malatya"],
+  ["daka", "Doğu Anadolu Kalkınma Ajansı", "van"],
+  ["serka", "Serhat Kalkınma Ajansı", "kars"],
+  ["kudaka", "Kuzeydoğu Anadolu Kalkınma Ajansı", "erzurum"],
+];
+
+const ADDITIONAL_SOURCE_REGISTRY = [
+  {
+    id: "ka-development-agencies",
+    name: "Kalkınma Ajansları Genel Müdürlüğü",
+    institutionId: "ka-development-agencies",
+    baseUrl: "https://ka.gov.tr",
+    listUrls: ["https://ka.gov.tr"],
+    detailUrlPatterns: ["/duyuru", "/destek", "/cagri", "/mali-destek"],
+    allowedDomains: ["ka.gov.tr", "sanayi.gov.tr"],
+    sourceType: "official-aggregator",
+    sourceGroup: "development-agency",
+    country: "TR",
+    countryCode: "TR",
+    language: "tr",
+    timezone: "Europe/Istanbul",
+    crawlMethod: "html",
+    crawlFrequencyMinutes: Number(process.env.CRAWL_FREQ_TR_MIN || 240),
+    rateLimitMs: 1800,
+    timeoutMs: 15000,
+    trustScore: 92,
+    isActive: true,
+    verificationStatus: SOURCE_VERIFICATION_STATUSES.PENDING_VERIFICATION,
+    healthStatus: SOURCE_HEALTH_STATUSES.DEGRADED,
+    verifiedAt: null,
+    lastSuccessfulCrawlAt: null,
+    requiresJavascript: false,
+    adapterName: "development-agencies-adapter",
+    config: { scope: "national", sourceGroup: "development-agency" },
+  },
+  {
+    id: "kosgeb",
+    name: "KOSGEB",
+    institutionId: "kosgeb",
+    baseUrl: "https://www.kosgeb.gov.tr",
+    listUrls: ["https://www.kosgeb.gov.tr/"],
+    detailUrlPatterns: ["/site/tr/genel/detay/", "/site/tr/genel/destekdetay/"],
+    allowedDomains: ["kosgeb.gov.tr"],
+    sourceType: "official",
+    sourceGroup: "national",
+    country: "TR",
+    countryCode: "TR",
+    language: "tr",
+    timezone: "Europe/Istanbul",
+    crawlMethod: "html",
+    crawlFrequencyMinutes: Number(process.env.CRAWL_FREQ_TR_MIN || 180),
+    rateLimitMs: 1500,
+    timeoutMs: 15000,
+    trustScore: 94,
+    isActive: true,
+    verificationStatus: SOURCE_VERIFICATION_STATUSES.VERIFIED,
+    healthStatus: SOURCE_HEALTH_STATUSES.DEGRADED,
+    verifiedAt: "2026-06-22T00:00:00.000Z",
+    lastSuccessfulCrawlAt: null,
+    requiresJavascript: false,
+    adapterName: "kosgeb-adapter",
+    config: { scope: "national", programmes: ["Girişimci Destek Programı", "KOBİ destekleri"] },
+  },
+  {
+    id: "tkdk",
+    name: "Tarım ve Kırsal Kalkınmayı Destekleme Kurumu",
+    institutionId: "tkdk",
+    baseUrl: "https://www.tkdk.gov.tr",
+    listUrls: ["https://www.tkdk.gov.tr/ProjeIslemleri/CagriIlanArsiv"],
+    detailUrlPatterns: ["/ProjeIslemleri/CagriIlanArsiv", "/Duyuru/", "/Haber/"],
+    allowedDomains: ["tkdk.gov.tr"],
+    sourceType: "official",
+    sourceGroup: "national",
+    country: "TR",
+    countryCode: "TR",
+    language: "tr",
+    timezone: "Europe/Istanbul",
+    crawlMethod: "html",
+    crawlFrequencyMinutes: Number(process.env.CRAWL_FREQ_TR_MIN || 240),
+    rateLimitMs: 1800,
+    timeoutMs: 15000,
+    trustScore: 94,
+    isActive: true,
+    verificationStatus: SOURCE_VERIFICATION_STATUSES.VERIFIED,
+    healthStatus: SOURCE_HEALTH_STATUSES.DEGRADED,
+    verifiedAt: "2026-06-22T00:00:00.000Z",
+    lastSuccessfulCrawlAt: null,
+    requiresJavascript: false,
+    adapterName: "tkdk-adapter",
+    config: { scope: "national", programmes: ["IPARD"] },
+  },
+  {
+    id: "turkiye-ulusal-ajansi",
+    name: "Türkiye Ulusal Ajansı",
+    institutionId: "turkiye-ulusal-ajansi",
+    baseUrl: "https://www.ua.gov.tr",
+    listUrls: ["https://www.ua.gov.tr/anasayfa/icerikler/teklif-cagrilari-ve-rehberler/"],
+    detailUrlPatterns: ["/anasayfa/icerikler/teklif-cagrilari-ve-rehberler/", "/programlar/", "/haberler/"],
+    allowedDomains: ["ua.gov.tr", "turnaportal.ua.gov.tr"],
+    sourceType: "official",
+    sourceGroup: "national",
+    country: "TR",
+    countryCode: "TR",
+    language: "tr",
+    timezone: "Europe/Istanbul",
+    crawlMethod: "html",
+    crawlFrequencyMinutes: Number(process.env.CRAWL_FREQ_TR_MIN || 240),
+    rateLimitMs: 1800,
+    timeoutMs: 15000,
+    trustScore: 94,
+    isActive: true,
+    verificationStatus: SOURCE_VERIFICATION_STATUSES.VERIFIED,
+    healthStatus: SOURCE_HEALTH_STATUSES.DEGRADED,
+    verifiedAt: "2026-06-22T00:00:00.000Z",
+    lastSuccessfulCrawlAt: null,
+    requiresJavascript: false,
+    adapterName: "turkiye-ulusal-ajansi-adapter",
+    config: { scope: "europe", programmes: ["Erasmus+", "European Solidarity Corps"] },
+  },
+  {
+    id: "eu-funding-tenders",
+    name: "EU Funding & Tenders Portal",
+    institutionId: "eu_commission",
+    baseUrl: "https://funding-tenders.ec.europa.eu",
+    listUrls: ["https://funding-tenders.ec.europa.eu/opportunities/portal/screen/opportunities/topic-search"],
+    detailUrlPatterns: ["/opportunities/portal/screen/opportunities/topic-details/"],
+    allowedDomains: ["funding-tenders.ec.europa.eu", "ec.europa.eu", "commission.europa.eu"],
+    sourceType: "programme-portal",
+    sourceGroup: "europe",
+    country: "EU",
+    countryCode: null,
+    language: "en",
+    timezone: "Europe/Brussels",
+    crawlMethod: "browser",
+    crawlFrequencyMinutes: Number(process.env.CRAWL_FREQ_EU_MIN || 240),
+    rateLimitMs: 2500,
+    timeoutMs: 20000,
+    trustScore: 96,
+    isActive: false,
+    verificationStatus: SOURCE_VERIFICATION_STATUSES.PENDING_VERIFICATION,
+    healthStatus: SOURCE_HEALTH_STATUSES.DISABLED,
+    verifiedAt: null,
+    lastSuccessfulCrawlAt: null,
+    requiresJavascript: true,
+    adapterName: "eu-funding-tenders-adapter",
+    config: { scope: "europe", pendingReason: "Requires browser/API adapter before activation." },
+  },
+  {
+    id: "undp-turkiye",
+    name: "UNDP Türkiye",
+    institutionId: "undp-turkiye",
+    baseUrl: "https://www.undp.org/tr/turkiye",
+    listUrls: ["https://www.undp.org/tr/turkiye/procurement"],
+    detailUrlPatterns: ["/procurement", "/calls-for-proposals"],
+    allowedDomains: ["undp.org"],
+    sourceType: "official",
+    sourceGroup: "international",
+    country: "TR",
+    countryCode: "TR",
+    language: "tr",
+    timezone: "Europe/Istanbul",
+    crawlMethod: "html",
+    crawlFrequencyMinutes: Number(process.env.CRAWL_FREQ_INTL_MIN || 360),
+    rateLimitMs: 2500,
+    timeoutMs: 15000,
+    trustScore: 86,
+    isActive: false,
+    verificationStatus: SOURCE_VERIFICATION_STATUSES.PENDING_VERIFICATION,
+    healthStatus: SOURCE_HEALTH_STATUSES.DISABLED,
+    verifiedAt: null,
+    lastSuccessfulCrawlAt: null,
+    requiresJavascript: false,
+    adapterName: "undp-turkiye-adapter",
+    config: { scope: "international", excludeProcurementOnly: true },
+  },
+];
+
+function normalizeSourceRegistry(items) {
+  return items.map((source) => {
+    const baseHostname = extractHostname(source.baseUrl);
+    const allowedDomains = source.allowedDomains?.length ? source.allowedDomains : [baseHostname].filter(Boolean);
+    const rateLimitMs = source.rateLimitMs ?? source.config?.rateLimitMs ?? 1500;
+    return {
+      ...source,
+      institutionId: source.institutionId ?? source.id,
+      detailUrlPatterns: source.detailUrlPatterns || source.config?.detailUrlPatterns || [],
+      allowedDomains,
+      sourceGroup: source.sourceGroup || source.config?.scope || "national",
+      countryCode: source.countryCode ?? source.country ?? null,
+      rateLimitMs,
+      timeoutMs: source.timeoutMs ?? Number(process.env.SOURCE_TIMEOUT_MS || 12000),
+      verificationStatus: source.verificationStatus || SOURCE_VERIFICATION_STATUSES.VERIFIED,
+      healthStatus: source.healthStatus || SOURCE_HEALTH_STATUSES.DEGRADED,
+      verifiedAt: source.verifiedAt || null,
+      lastSuccessfulCrawlAt: source.lastSuccessfulCrawlAt || null,
+      config: { ...(source.config || {}), rateLimitMs },
+    };
+  });
+}
+
+export const SOURCE_REGISTRY = normalizeSourceRegistry([...CORE_SOURCE_REGISTRY, ...ADDITIONAL_SOURCE_REGISTRY]);
 
 export const FUNDING_SOURCES = [
   {
@@ -318,6 +574,134 @@ export const FUNDING_SOURCES = [
   },
 ];
 
+FUNDING_SOURCES.push(
+  {
+    id: "kosgeb",
+    name: "Small and Medium Enterprises Development Organization of Türkiye",
+    name_tr: "KOSGEB",
+    shortName: "KOSGEB",
+    aliases: ["KOSGEB", "Küçük ve Orta Ölçekli İşletmeleri Geliştirme ve Destekleme İdaresi Başkanlığı"],
+    official_domains: ["kosgeb.gov.tr"],
+    source_type: "national_public_institution",
+    institutionType: "national-public-institution",
+    sourceGroup: "national",
+    region: "Türkiye",
+    country: "TR",
+    countryCode: "TR",
+    programmes: ["Girişimci Destek Programı", "KOBİ destekleri", "İş Geliştirme Desteği"],
+    programs: ["Girişimci Destek Programı", "KOBİ destekleri", "İş Geliştirme Desteği"],
+    detection_keywords: ["KOSGEB", "KOBİ", "girişimci destek programı", "iş geliştirme çağrısı", "destek başvuruları"],
+    detectionKeywords: ["KOSGEB", "KOBİ", "girişimci destek programı", "iş geliştirme çağrısı", "destek başvuruları"],
+    application_url_patterns: ["/site/tr/genel/detay/", "/site/tr/genel/destekdetay/"],
+    priority: 96,
+    active: true,
+  },
+  {
+    id: "tkdk",
+    name: "Agriculture and Rural Development Support Institution",
+    name_tr: "Tarım ve Kırsal Kalkınmayı Destekleme Kurumu",
+    shortName: "TKDK",
+    aliases: ["TKDK", "Tarım ve Kırsal Kalkınmayı Destekleme Kurumu", "IPARD"],
+    official_domains: ["tkdk.gov.tr"],
+    source_type: "national_public_institution",
+    institutionType: "national-public-institution",
+    sourceGroup: "national",
+    region: "Türkiye",
+    country: "TR",
+    countryCode: "TR",
+    programmes: ["IPARD", "IPARD III"],
+    programs: ["IPARD", "IPARD III"],
+    detection_keywords: ["IPARD", "başvuru çağrı ilanı", "kırsal kalkınma", "hibe desteği"],
+    detectionKeywords: ["IPARD", "başvuru çağrı ilanı", "kırsal kalkınma", "hibe desteği"],
+    application_url_patterns: ["/ProjeIslemleri/CagriIlanArsiv", "/Duyuru/", "/Haber/"],
+    priority: 96,
+    active: true,
+  },
+  {
+    id: "turkiye-ulusal-ajansi",
+    name: "Turkish National Agency",
+    name_tr: "Türkiye Ulusal Ajansı",
+    shortName: "Ulusal Ajans",
+    aliases: ["Türkiye Ulusal Ajansı", "Ulusal Ajans", "Turkish National Agency", "Erasmus+", "Avrupa Dayanışma Programı"],
+    official_domains: ["ua.gov.tr", "turnaportal.ua.gov.tr"],
+    source_type: "national_public_institution",
+    institutionType: "national-public-institution",
+    sourceGroup: "national",
+    region: "Türkiye",
+    country: "TR",
+    countryCode: "TR",
+    programmes: ["Erasmus+", "European Solidarity Corps", "Avrupa Dayanışma Programı"],
+    programs: ["Erasmus+", "European Solidarity Corps", "Avrupa Dayanışma Programı"],
+    detection_keywords: ["teklif çağrısı", "program rehberi", "Erasmus+", "ESC", "hibe programı"],
+    detectionKeywords: ["teklif çağrısı", "program rehberi", "Erasmus+", "ESC", "hibe programı"],
+    application_url_patterns: ["/anasayfa/icerikler/teklif-cagrilari-ve-rehberler/", "/programlar/", "/haberler/"],
+    priority: 96,
+    active: true,
+  },
+  {
+    id: "ka-development-agencies",
+    name: "Development Agencies General Directorate",
+    name_tr: "Kalkınma Ajansları Genel Müdürlüğü",
+    shortName: "Kalkınma Ajansları",
+    aliases: ["Kalkınma Ajansları", "Kalkınma Ajansları Genel Müdürlüğü", ...DEVELOPMENT_AGENCIES.flatMap(([, name]) => [name])],
+    official_domains: ["ka.gov.tr", "sanayi.gov.tr"],
+    source_type: "development_agency_aggregator",
+    institutionType: "national-public-institution",
+    sourceGroup: "development-agency",
+    region: "Türkiye",
+    country: "TR",
+    countryCode: "TR",
+    programmes: ["Mali Destek Programı", "Teknik Destek", "Fizibilite Desteği"],
+    programs: ["Mali Destek Programı", "Teknik Destek", "Fizibilite Desteği"],
+    detection_keywords: ["mali destek programı", "teklif çağrısı", "proje teklif çağrısı", "başvuru rehberi"],
+    detectionKeywords: ["mali destek programı", "teklif çağrısı", "proje teklif çağrısı", "başvuru rehberi"],
+    application_url_patterns: ["/destek", "/cagri", "/duyuru", "/mali-destek"],
+    priority: 92,
+    active: true,
+  },
+  ...DEVELOPMENT_AGENCIES.map(([id, name, regionCode]) => ({
+    id,
+    name,
+    name_tr: name,
+    shortName: id.toUpperCase("tr-TR"),
+    aliases: [name, id.toUpperCase("tr-TR")],
+    official_domains: [],
+    source_type: "development_agency",
+    institutionType: "development-agency",
+    sourceGroup: "development-agency",
+    region: "Türkiye",
+    country: "TR",
+    countryCode: "TR",
+    regionCode,
+    provinces: [],
+    programmes: ["Mali Destek Programı", "Teknik Destek", "Fizibilite Desteği"],
+    programs: ["Mali Destek Programı", "Teknik Destek", "Fizibilite Desteği"],
+    detection_keywords: [name, "kalkınma ajansı", "mali destek programı"],
+    detectionKeywords: [name, "kalkınma ajansı", "mali destek programı"],
+    application_url_patterns: [],
+    priority: 80,
+    active: true,
+  })),
+);
+
+export const FUNDING_INSTITUTIONS = FUNDING_SOURCES.map((source) => ({
+  id: source.id,
+  name: source.name,
+  nameTr: source.name_tr || source.name,
+  shortName: source.shortName || source.name_tr || source.name,
+  aliases: source.aliases || [],
+  officialDomains: source.official_domains || [],
+  institutionType: source.institutionType || source.source_type || "other",
+  sourceGroup: source.sourceGroup || source.region || "national",
+  countryCode: source.countryCode ?? source.country ?? null,
+  regionCode: source.regionCode || null,
+  provinces: source.provinces || [],
+  programmes: source.programmes || source.programs || [],
+  detectionKeywords: source.detectionKeywords || source.detection_keywords || [],
+  active: source.active !== false,
+}));
+
+const PRIVATE_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1"]);
 const STATE_VERSION = 1;
 
 export function normalizeText(value = "") {
@@ -489,8 +873,13 @@ function findSourceForCall(call) {
   if (sourceText.includes("eureka")) return sourceById("eureka");
   if (sourceText.includes("euresearch")) return sourceById("euresearch");
   if (sourceText.includes("euroaccess")) return sourceById("euroaccess");
+  if (sourceText.includes("hibeportalı") || sourceText.includes("hibeportali")) return sourceById("hibeportali-cascade");
   if (sourceText.includes("grants.gov")) return sourceById("grants-gov");
   if (sourceText.includes("tüseb")) return sourceById("tuseb");
+  if (sourceText.includes("kosgeb")) return sourceById("kosgeb");
+  if (sourceText.includes("tkdk") || sourceText.includes("ipard")) return sourceById("tkdk");
+  if (sourceText.includes("ulusal ajans") || sourceText.includes("erasmus") || sourceText.includes("dayanışma")) return sourceById("turkiye-ulusal-ajansi");
+  if (sourceText.includes("kalkınma ajansı")) return sourceById("ka-development-agencies");
   return null;
 }
 
@@ -513,23 +902,36 @@ export function parseImportantDates(text = "", { timezone = "Europe/Istanbul" } 
   const clean = normalizeText(text);
   const monthMap = {
     ocak: 1,
+    oca: 1,
     subat: 2,
     şubat: 2,
+    şub: 2,
     mart: 3,
+    mar: 3,
     nisan: 4,
+    nis: 4,
     mayis: 5,
     mayıs: 5,
+    may: 5,
     haziran: 6,
+    haz: 6,
     temmuz: 7,
+    tem: 7,
     agustos: 8,
     ağustos: 8,
+    agu: 8,
+    ağu: 8,
     eylul: 9,
     eylül: 9,
+    eyl: 9,
     ekim: 10,
+    eki: 10,
     kasim: 11,
     kasım: 11,
+    kas: 11,
     aralik: 12,
     aralık: 12,
+    ara: 12,
     jan: 1,
     january: 1,
     feb: 2,
@@ -903,6 +1305,44 @@ export function dedupeAndFlag(calls) {
   return { calls: result, duplicates };
 }
 
+function positiveInt(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
+}
+
+export async function mapWithConcurrency(items = [], limit = 3, mapper = async (item) => item) {
+  const result = new Array(items.length);
+  const concurrency = Math.max(1, Math.min(positiveInt(limit, 1), items.length || 1));
+  let cursor = 0;
+  await Promise.all(
+    Array.from({ length: concurrency }, async () => {
+      while (cursor < items.length) {
+        const index = cursor;
+        cursor += 1;
+        result[index] = await mapper(items[index], index);
+      }
+    }),
+  );
+  return result;
+}
+
+function dedupeListItems(items = []) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = item?.id || item?.url || `${item?.title || ""}:${item?.deadline || ""}`;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function shouldDeepScrape(source, scraper) {
+  if (!scraper?.fetchDetailPage || !scraper?.extractDetailData) return false;
+  if (process.env.ENABLE_DEEP_SCRAPING === "false") return false;
+  if (source.sourceType === "secondary" && process.env.ENABLE_SECONDARY_DEEP_SCRAPING !== "true") return false;
+  return true;
+}
+
 export function detectChanges(previousCalls = {}, nextCalls = []) {
   const changes = [];
   const criticalFields = ["deadline", "normalizedStatus", "budgetMax", "supportRate", "applicationUrl", "guideUrl", "contentHash"];
@@ -1121,25 +1561,30 @@ export function createSourceAdapters(scraperMap = {}) {
       if (!scraper) return [];
       if (typeof scraper === "function") return scraper();
       const urls = await (scraper.discover?.() || source.listUrls);
-      const items = [];
-      for (const url of urls) {
+      const pageConcurrency = positiveInt(process.env.SOURCE_PAGE_CONCURRENCY || source.config?.pageConcurrency, 3);
+      const detailConcurrency = positiveInt(process.env.SOURCE_DETAIL_CONCURRENCY || source.config?.detailConcurrency, 4);
+      const pages = await mapWithConcurrency(urls, pageConcurrency, async (url) => {
         const page = await scraper.fetchListPage(url);
-        const listItems = await scraper.extractListItems(page);
-        if (process.env.ENABLE_DEEP_SCRAPING !== "false" && scraper.fetchDetailPage && scraper.extractDetailData) {
-          for (const item of listItems) {
-            try {
-              const detailPage = await scraper.fetchDetailPage(item);
-              const detail = await scraper.extractDetailData(detailPage, item);
-              items.push({ ...item, ...detail });
-            } catch {
-              items.push(item);
-            }
-          }
-        } else {
-          items.push(...listItems);
+        return scraper.extractListItems(page);
+      });
+      const listItems = dedupeListItems(pages.flat());
+      if (!shouldDeepScrape(source, scraper)) return listItems;
+      const detailLimit = positiveInt(process.env.SOURCE_DETAIL_LIMIT || source.config?.detailLimit, listItems.length);
+      const detailItems = listItems.slice(0, detailLimit);
+      const enriched = await mapWithConcurrency(detailItems, detailConcurrency, async (item) => {
+        try {
+          const detailPage = await scraper.fetchDetailPage(item);
+          const detail = await scraper.extractDetailData(detailPage, item);
+          return { ...item, ...detail };
+        } catch {
+          return item;
         }
-      }
-      return items;
+      });
+      if (detailLimit >= listItems.length) return enriched;
+      return [
+        ...enriched,
+        ...listItems.slice(detailLimit),
+      ];
     },
     validateExtractedData: async (items) => items.filter(Boolean),
     normalizeData: async (items, previousCalls = {}) => items.map((item) => {
@@ -1157,27 +1602,27 @@ export async function loadAutomationState(statePath) {
       // Fallback to initial if db empty
       throw new Error("Empty DB");
     }
-    return dbState;
+    return hydrateAutomationState(dbState);
   } catch {
     // Try to load from legacy JSON file if DB fails/is empty
     try {
       const raw = await fs.readFile(statePath, "utf8");
-      const legacyState = { version: STATE_VERSION, ...JSON.parse(raw) };
+      const legacyState = hydrateAutomationState({ version: STATE_VERSION, ...JSON.parse(raw) });
       // Migrate to DB automatically
       saveStateToDb(legacyState);
       return legacyState;
     } catch {
-      return {
+      return hydrateAutomationState({
         version: STATE_VERSION,
         calls: {},
-        sources: Object.fromEntries(SOURCE_REGISTRY.map((source) => [source.id, { ...source, consecutiveFailures: 0, healthStatus: "healthy" }])),
+        sources: {},
         sourceCrawlLogs: [],
         callChangeLogs: [],
         manualReviewQueue: [],
         crawlerJobs: [],
         linkHealthChecks: [],
         metrics: {},
-      };
+      });
     }
   }
 }
@@ -1186,17 +1631,58 @@ export async function saveAutomationState(statePath, state) {
   saveStateToDb(state);
 }
 
+function hydrateAutomationState(state = {}) {
+  const sources = { ...(state.sources || {}) };
+  for (const source of SOURCE_REGISTRY) {
+    const previous = sources[source.id] || {};
+    const verificationStatus = previous.verificationStatus || source.verificationStatus;
+    const previousHealthStatus = previous.healthStatus || source.healthStatus;
+    const healthStatus = verificationStatus === SOURCE_VERIFICATION_STATUSES.VERIFIED
+      ? previousHealthStatus
+      : previousHealthStatus === SOURCE_HEALTH_STATUSES.DISABLED ? SOURCE_HEALTH_STATUSES.DISABLED : SOURCE_HEALTH_STATUSES.DEGRADED;
+    sources[source.id] = {
+      ...source,
+      ...previous,
+      verificationStatus,
+      healthStatus,
+      consecutiveFailures: previous.consecutiveFailures || 0,
+      successfulCrawlCount: previous.successfulCrawlCount || 0,
+      lastResultCount: previous.lastResultCount ?? null,
+    };
+  }
+  return {
+    version: STATE_VERSION,
+    calls: {},
+    sourceCrawlLogs: [],
+    callChangeLogs: [],
+    manualReviewQueue: [],
+    crawlerJobs: [],
+    linkHealthChecks: [],
+    metrics: {},
+    ...state,
+    sources,
+  };
+}
+
 export function updateSourceHealth(state, source, { ok, durationMs = 0, status = null, error = null, found = 0 } = {}) {
   const current = state.sources[source.id] || { ...source, consecutiveFailures: 0 };
   const now = new Date().toISOString();
   const consecutiveFailures = ok ? 0 : (current.consecutiveFailures || 0) + 1;
-  const healthStatus = ok ? "healthy" : consecutiveFailures >= 3 ? "failed" : "degraded";
+  const successfulCrawlCount = ok ? (current.successfulCrawlCount || 0) + 1 : current.successfulCrawlCount || 0;
+  const verificationStatus = current.verificationStatus || source.verificationStatus || SOURCE_VERIFICATION_STATUSES.PENDING_VERIFICATION;
+  const canBeHealthy = verificationStatus === SOURCE_VERIFICATION_STATUSES.VERIFIED && successfulCrawlCount >= 2;
+  const healthStatus = ok
+    ? canBeHealthy ? SOURCE_HEALTH_STATUSES.HEALTHY : SOURCE_HEALTH_STATUSES.DEGRADED
+    : consecutiveFailures >= 3 ? SOURCE_HEALTH_STATUSES.FAILING : SOURCE_HEALTH_STATUSES.DEGRADED;
   state.sources[source.id] = {
     ...current,
     lastSuccessfulCrawlAt: ok ? now : current.lastSuccessfulCrawlAt || null,
     lastFailedCrawlAt: ok ? current.lastFailedCrawlAt || null : now,
     consecutiveFailures,
+    successfulCrawlCount,
     healthStatus,
+    verificationStatus,
+    lastResultCount: found,
     averageResponseTimeMs: current.averageResponseTimeMs ? Math.round((current.averageResponseTimeMs + durationMs) / 2) : durationMs,
     lastHttpStatus: status,
   };
@@ -1251,34 +1737,34 @@ export function buildLinkCheckCandidates(calls, { limit = Number(process.env.LIN
     .slice(0, limit);
 }
 
-export async function verifyLinks(calls, { timeoutMs = 5000, candidates = null } = {}) {
-  const checks = [];
-  const linkCandidates = candidates || buildLinkCheckCandidates(calls);
-  for (const candidate of linkCandidates) {
-    const started = Date.now();
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      let response = await fetch(candidate.url, { method: "HEAD", redirect: "follow", signal: controller.signal });
-      if ([405, 501].includes(response.status)) {
-        response = await fetch(candidate.url, { method: "GET", redirect: "follow", signal: controller.signal });
-      }
-      clearTimeout(timer);
-      const redirected = response.url && response.url !== candidate.url;
-      checks.push({
-        ...candidate,
-        status: redirected ? LINK_STATUSES.REDIRECTED : response.ok ? LINK_STATUSES.WORKING : response.status === 403 ? LINK_STATUSES.FORBIDDEN : LINK_STATUSES.BROKEN,
-        httpStatus: response.status,
-        finalUrl: response.url,
-        durationMs: Date.now() - started,
-        checkedAt: new Date().toISOString(),
-      });
-    } catch (error) {
-      clearTimeout(timer);
-      checks.push({ ...candidate, status: error.name === "AbortError" ? LINK_STATUSES.TIMEOUT : LINK_STATUSES.UNKNOWN, durationMs: Date.now() - started, error: error.message, checkedAt: new Date().toISOString() });
+async function verifySingleLink(candidate, timeoutMs) {
+  const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    let response = await fetch(candidate.url, { method: "HEAD", redirect: "follow", signal: controller.signal });
+    if ([405, 501].includes(response.status)) {
+      response = await fetch(candidate.url, { method: "GET", redirect: "follow", signal: controller.signal });
     }
+    clearTimeout(timer);
+    const redirected = response.url && response.url !== candidate.url;
+    return {
+      ...candidate,
+      status: redirected ? LINK_STATUSES.REDIRECTED : response.ok ? LINK_STATUSES.WORKING : response.status === 403 ? LINK_STATUSES.FORBIDDEN : LINK_STATUSES.BROKEN,
+      httpStatus: response.status,
+      finalUrl: response.url,
+      durationMs: Date.now() - started,
+      checkedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    clearTimeout(timer);
+    return { ...candidate, status: error.name === "AbortError" ? LINK_STATUSES.TIMEOUT : LINK_STATUSES.UNKNOWN, durationMs: Date.now() - started, error: error.message, checkedAt: new Date().toISOString() };
   }
-  return checks;
+}
+
+export async function verifyLinks(calls, { timeoutMs = 5000, candidates = null, concurrency = Number(process.env.LINK_VERIFY_CONCURRENCY || 5) } = {}) {
+  const linkCandidates = candidates || buildLinkCheckCandidates(calls);
+  return mapWithConcurrency(linkCandidates, concurrency, (candidate) => verifySingleLink(candidate, timeoutMs));
 }
 
 export function buildAutomationMetrics(state, calls) {
@@ -1286,10 +1772,13 @@ export function buildAutomationMetrics(state, calls) {
   const crawlLogs24 = state.sourceCrawlLogs.filter((log) => new Date(log.timestamp).getTime() >= last24);
   const changeLogs24 = state.callChangeLogs.filter((log) => new Date(log.detectedAt).getTime() >= last24);
   const activeSources = Object.values(state.sources).filter((source) => source.isActive !== false);
-  const failedSources = activeSources.filter((source) => source.healthStatus === "failed");
+  const failedSources = activeSources.filter((source) => source.healthStatus === SOURCE_HEALTH_STATUSES.FAILING);
+  const pendingVerificationSources = activeSources.filter((source) => source.verificationStatus !== SOURCE_VERIFICATION_STATUSES.VERIFIED);
   const confidenceScores = calls.map((call) => call.confidenceScore || 0);
   return {
     activeSources: activeSources.length,
+    verifiedSources: activeSources.length - pendingVerificationSources.length,
+    pendingVerificationSources: pendingVerificationSources.length,
     crawledUrlsLast24h: crawlLogs24.length,
     newCallsLast24h: changeLogs24.filter((log) => log.field === "created").length,
     updatedCallsLast24h: changeLogs24.filter((log) => log.field !== "created").length,

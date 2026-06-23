@@ -1314,7 +1314,8 @@ strong {
   gap: 10px;
 }
 
-.selectGrid select {
+.selectGrid select,
+.fieldLabel > select {
   width: 100%;
   min-height: 42px;
   border: 1px solid var(--border);
@@ -1326,7 +1327,8 @@ strong {
   font-weight: 700;
 }
 
-.selectGrid select:focus {
+.selectGrid select:focus,
+.fieldLabel > select:focus {
   border-color: var(--secondary-button);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
 }
@@ -1650,6 +1652,46 @@ strong {
   overflow: hidden;
 }
 
+.cardAudience {
+  display: grid;
+  gap: 8px;
+  margin: -2px 0 14px;
+  padding: 11px 12px;
+  border: 1px solid rgba(20, 184, 166, 0.22);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(240, 253, 250, 0.9), rgba(239, 246, 255, 0.9));
+}
+
+.cardAudienceLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #0f766e;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 850;
+}
+
+.cardAudienceChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cardAudienceChips span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  padding: 4px 9px;
+  border: 1px solid rgba(15, 118, 110, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #0f172a;
+  font-size: 12px;
+  line-height: 15px;
+  font-weight: 800;
+}
+
 .cardFacts {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1771,6 +1813,281 @@ strong {
 .adminGrid span {
   color: var(--muted);
   font-weight: 800;
+}
+
+.adminEditorShell {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 22px;
+  padding-bottom: 24px;
+}
+
+.adminLoginShell {
+  min-height: 380px;
+  display: grid;
+  place-items: start center;
+  padding-bottom: 42px;
+}
+
+.adminLoginCard {
+  width: min(100%, 420px);
+  display: grid;
+  gap: 16px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+  padding: 24px;
+}
+
+.adminLoginCard h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 24px;
+  letter-spacing: 0;
+}
+
+.adminLoginCard label,
+.adminSessionBox {
+  display: grid;
+  gap: 7px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.adminLoginCard input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 11px 12px;
+  background: #ffffff;
+  color: var(--text);
+  font-weight: 650;
+}
+
+.adminSessionBox {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-low);
+  padding: 12px;
+}
+
+.adminSessionBox span,
+.adminSessionBox small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.adminSessionBox strong {
+  color: var(--text);
+  font-size: 15px;
+}
+
+.adminSidebar,
+.adminPanel {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.adminSidebar {
+  position: sticky;
+  top: 92px;
+  align-self: start;
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.adminSidebar nav {
+  display: grid;
+  gap: 8px;
+}
+
+.adminSidebar button,
+.adminPanel button,
+.sectionEditor button {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-low);
+  color: var(--text);
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.adminSidebar nav button {
+  justify-content: flex-start;
+  padding: 0 12px;
+}
+
+.adminSidebar .secondaryAction {
+  background: #ffffff;
+  color: var(--text);
+}
+
+.adminSidebar button.active,
+.articleList button.active {
+  border-color: var(--secondary);
+  background: var(--primary);
+  color: #ffffff;
+}
+
+.adminSidebar label,
+.adminPanel label,
+.sectionEditor label {
+  display: grid;
+  gap: 7px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.adminSidebar input,
+.adminPanel input,
+.adminPanel textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 11px 12px;
+  background: #ffffff;
+  color: var(--text);
+  font-weight: 650;
+}
+
+.adminPanel textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.adminStatus {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 750;
+}
+
+.adminEditorMain {
+  min-width: 0;
+}
+
+.adminPanel {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+}
+
+.adminPanelHeader,
+.sectionEditorHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.adminFormGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.adminImagePreview {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.adminImagePreview img,
+.articleCoverImage,
+.heroManagedImage {
+  width: 100%;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--surface-low);
+}
+
+.adminImagePreview img,
+.adminImagePreview span {
+  min-height: 130px;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+}
+
+.heroManagedImage {
+  max-height: 260px;
+  margin-top: 4px;
+}
+
+.articleCoverImage {
+  max-height: 360px;
+  margin-top: 8px;
+}
+
+.articleEditorLayout {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 18px;
+}
+
+.articleList {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  max-height: 760px;
+  overflow: auto;
+}
+
+.articleList button {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  min-height: 68px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.articleList span {
+  color: inherit;
+  opacity: 0.78;
+  font-size: 12px;
+}
+
+.articleEditor {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.sectionEditor {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-low);
+}
+
+.sectionEditor > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  gap: 10px;
+}
+
+.dangerButton {
+  border-color: var(--danger-soft) !important;
+  background: var(--danger-soft) !important;
+  color: var(--danger) !important;
 }
 
 .summaryCard {
@@ -3219,6 +3536,13 @@ strong {
   line-height: 30px;
 }
 
+.filterHeader p {
+  margin: 4px 0 0;
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 13px;
+  line-height: 18px;
+}
+
 .filterHeader button {
   color: rgba(255, 255, 255, 0.68);
 }
@@ -3296,12 +3620,161 @@ strong {
   gap: 14px;
 }
 
-.selectGrid select {
+.selectGrid select,
+.fieldLabel > select,
+.selectGrid input {
   min-height: 46px;
   border-color: rgba(255, 255, 255, 0.44);
   border-radius: 8px;
   background: rgba(8, 20, 38, 0.78);
   color: #ffffff;
+}
+
+.selectGrid input::placeholder {
+  color: rgba(255, 255, 255, 0.46);
+}
+
+.keywordPatternGrid {
+  display: grid;
+  gap: 8px;
+}
+
+.keywordPatternGrid button {
+  min-height: 74px;
+  display: grid;
+  gap: 4px;
+  padding: 10px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.86);
+  cursor: pointer;
+  text-align: left;
+}
+
+.keywordPatternGrid strong {
+  color: #ffffff;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 850;
+}
+
+.keywordPatternGrid span {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.keywordPatternGrid button:hover,
+.keywordPatternGrid button.active {
+  border-color: rgba(34, 211, 238, 0.8);
+  background: rgba(34, 211, 238, 0.16);
+  color: #ffffff;
+}
+
+.keywordPatternGrid button.empty:not(.active) {
+  opacity: 0.58;
+}
+
+.keywordPatternGrid em {
+  justify-self: start;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.76);
+  font-style: normal;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 800;
+}
+
+.checkFilter {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 700;
+}
+
+.checkFilter input {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  accent-color: #22d3ee;
+}
+
+.activeFilterBar {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.activeFilterBar.empty {
+  grid-template-columns: minmax(0, 1fr);
+  background: var(--surface-low);
+}
+
+.activeFilterBar > div:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.activeFilterBar strong,
+.activeFilterBar span {
+  color: var(--text);
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 850;
+}
+
+.activeFilterBar small {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.activeFilterChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.activeFilterChips button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #174ea6;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 800;
+}
+
+.activeFilterChips button:hover {
+  border-color: #7dd3fc;
+  background: #e0f7ff;
+}
+
+.activeFilterChips .clearAllChip {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
 }
 
 .syncBox {
@@ -3436,6 +3909,29 @@ strong {
   font-size: 14px;
   line-height: 21px;
   -webkit-line-clamp: 2;
+}
+
+.cardAudience {
+  margin: 0 0 10px;
+  padding: 9px 10px;
+  border-radius: 10px;
+}
+
+.cardAudienceLabel {
+  color: #0f766e;
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.cardAudienceChips {
+  gap: 5px;
+}
+
+.cardAudienceChips span {
+  min-height: 23px;
+  padding: 3px 8px;
+  font-size: 11px;
+  line-height: 14px;
 }
 
 .cardMetaLine {
@@ -3628,6 +4124,19 @@ strong {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .adminEditorShell,
+  .articleEditorLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .adminSidebar {
+    position: static;
+  }
+
+  .articleList {
+    max-height: none;
+  }
+
   .callsSection {
     grid-template-columns: 1fr;
   }
@@ -3743,6 +4252,11 @@ strong {
     align-items: stretch;
     flex-direction: column;
     padding-top: 24px;
+  }
+
+  .adminFormGrid,
+  .adminImagePreview {
+    grid-template-columns: 1fr;
   }
 
   .callsHeroActions {
@@ -3926,6 +4440,12 @@ strong {
   font-size: 14px;
   cursor: pointer;
   transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.chipButton svg {
+  flex-shrink: 0;
 }
 .chipButton:hover {
   background: var(--surface-hover);

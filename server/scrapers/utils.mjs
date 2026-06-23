@@ -57,9 +57,10 @@ export function parseDateLoose(value) {
   if (!value) return null;
   const clean = normalizeWhitespace(value);
   const months = {
-    ocak: 0, subat: 1, şubat: 1, mart: 2, nisan: 3, mayis: 4, mayıs: 4, haziran: 5,
-    temmuz: 6, agustos: 7, ağustos: 7, eylul: 8, eylül: 8, ekim: 9, kasim: 10,
-    kasım: 10, aralik: 11, aralık: 11, jan: 0, january: 0, feb: 1, february: 1,
+    ocak: 0, oca: 0, subat: 1, şubat: 1, şub: 1, mart: 2, mar: 2, nisan: 3, nis: 3,
+    mayis: 4, mayıs: 4, may: 4, haziran: 5, haz: 5, temmuz: 6, tem: 6,
+    agustos: 7, ağustos: 7, agu: 7, ağu: 7, eylul: 8, eylül: 8, eyl: 8, ekim: 9, eki: 9,
+    kasim: 10, kasım: 10, kas: 10, aralik: 11, aralık: 11, ara: 11, jan: 0, january: 0, feb: 1, february: 1,
     mar: 2, march: 2, apr: 3, april: 3, may: 4, jun: 5, june: 5, jul: 6, july: 6,
     aug: 7, august: 7, sep: 8, september: 8, oct: 9, october: 9, nov: 10,
     november: 10, dec: 11, december: 11,
@@ -98,8 +99,8 @@ export function extractMoney(text) {
 
 export function classifyScope(source, title = "") {
   const value = `${source} ${title}`.toLocaleLowerCase("tr-TR");
-  if (value.includes("tübitak") || value.includes("tuseb") || value.includes("kosgeb")) return "Ulusal";
-  if (value.includes("ufuk") || value.includes("horizon") || value.includes("eureka") || value.includes("euro")) return "Avrupa";
+  if (value.includes("tübitak") || value.includes("tuseb") || value.includes("kosgeb") || value.includes("tkdk") || value.includes("ipard")) return "Ulusal";
+  if (value.includes("ulusal ajans") || value.includes("erasmus") || value.includes("dayanışma") || value.includes("ufuk") || value.includes("horizon") || value.includes("eureka") || value.includes("euro")) return "Avrupa";
   return "Yurtdışı";
 }
 
