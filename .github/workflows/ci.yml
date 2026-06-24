@@ -37,7 +37,7 @@ jobs:
           context: .
           load: true
           tags: hiberota:ci
-      - uses: aquasecurity/trivy-action@0.28.0
+      - uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: hiberota:ci
           format: sarif
